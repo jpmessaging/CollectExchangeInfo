@@ -5,6 +5,8 @@ For more details, see the script's comment-based help.
 
 [Download Link](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2019-05-31/Collect-ExchangeInfo.ps1)
 
+Load-Clixml.ps1 contains a function "Load-Clixml" which simply imports all xml files in a specified folder and creates corresponding variables in the global scope. For example, for a file "ExchangeServer.xml" it creates a variable $ExchangeServer.  This script is just to make it easy to load all the xml files collected.  You do not need this file to use Collect-ExchangeInfo.ps1 and this function can be used independently.
+
 # Sample usage
 1. This will collect only Active Directory-based information  
 
