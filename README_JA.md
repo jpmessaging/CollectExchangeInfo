@@ -5,6 +5,8 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 ※ 異なるバージョンの Exchange サーバーが混在する環境においては、最も新しいバージョンのサーバーで実行ください (例: Exchange 2013 と Exchange 2010 の混在環境の場合には、Exchange 2013 サーバーで実行ください)。
 
+より詳細については、スクリプトのコメント ベースのヘルプを参照ください。
+
 [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2019-05-31/Collect-ExchangeInfo.ps1)
 
 # 実行例
