@@ -21,3 +21,8 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
     ```PowerShell
     .\Collect-ExchangeInfo.ps1 -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
     ```
+
+# 補足
+ps1 ファイルをダウンロード後、以下の手順でブロックを解除します。
+1. ファイルを右クリックして、プロパティを開きます
+2. [全般] タブにて、「このファイルは他のコンピューターから取得したものです。このコンピューターを保護するため、このふぃあるへのアクセスはブロックされる可能性があります。」というメッセージが表示されている場合には、[許可する] にチェックを入れます。
