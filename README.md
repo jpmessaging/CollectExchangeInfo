@@ -9,12 +9,12 @@ For more details, see the script's comment-based help.
 1. This will collect only Active Directory-based information  
 
     ```PowerShell
-    .\Collect-ExchangeInfo -Path C:\exinfo
+    .\Collect-ExchangeInfo.ps1 -Path C:\exinfo
     ```
 
 2. In addition to the information gathered by 1., this will include machine-specific informtion for servers whose name matches ("EX-*").  Their event logs + Exchange's crimson logs are also collected.
 
     ```PowerShell
-    .\Collect-ExchangeInfo -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
+    .\Collect-ExchangeInfo.ps1 -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
     ```
 
