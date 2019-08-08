@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Collect Exchange Related Information
 
@@ -92,7 +92,7 @@ param
     [switch]$KeepOutputFiles
 )
 
-$version = "2019-05-31"
+$version = "2019-08-08"
 #requires -Version 2.0
 
 <#
@@ -109,18 +109,12 @@ function Save-Object
         $Name,
         [string]$Path = $Script:Path,
         [string]$ErrorPath = [System.IO.Path]::Combine($Path, "errors.txt"),
-        [bool]$WithCliXml = $true
+        [bool]$WithCliXml = $true,
+        $Depth = 5 # depth for Export-CliXml
     )
  
     BEGIN
     {     
-        # if the path doesn't exist, create it.
-        if (!(Test-Path $Path))
-        {
-           New-item -ItemType directory $Path | Out-Null
-        }
-        
-        $Path = Resolve-Path $Path
         # Need to accumulate result to support pipeline. Use List<> to improve performance
         $objectList = New-Object System.Collections.Generic.List[object]
         [string]$objectName = $Name
@@ -141,14 +135,13 @@ function Save-Object
             {
                 return
             }
+            <#
             elseif($o -is [string])
-            {
-                # assume a string object is an error and output it to ErrorPath
-                #Add-Content $ErrorPath $o
-
-                # # assume a string object is an error and write it to log
+            {                
+                # assume a string object is an error and write it to log
                 Write-Log $o
             }
+            #>
             else 
             {                
                 if (-not($objectName))
@@ -170,13 +163,11 @@ function Save-Object
             }
 
             if ($WithCliXml)
-            {
-                $objectList | select * | Tee-Object -FilePath:([System.IO.Path]::Combine($Path, "$objectName.txt")) | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8
+            {                
+                $objectList | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
             }
-            else
-            {
-                $objectList | select * | OUt-File ([System.IO.Path]::Combine($Path, "$objectName.txt")) 
-            }
+            
+            $objectList | select * | Out-File ([System.IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8            
         }
     }
 }
@@ -384,8 +375,6 @@ function Run-Ldifde
 <#
   Run a given command only if it's available
   Run with parameters specified as Global Parameter (i.e. $script:Parameters)
- 
-  Note: There's no check for the availability of parameters.
 #>
 function RunCommand
 {
@@ -414,8 +403,7 @@ function RunCommand
     } 
 
     # check params
-    # if any explicitly-requested params are not available, bail
-    
+    # if any explicitly-requested params are not available, bail    
     $paramMatches = Select-String " -(?<paramName>\w+)" -Input $Command -AllMatches
 
     if ($paramMatches)
@@ -474,6 +462,24 @@ function RunCommand
     Write-Log "Running $Command"
     try
     {
+        $err = $($o = Invoke-Expression $Command) 2>&1
+        if ($err)
+        {
+            Write-Log "[Error] `"$Command`" failed. $err"
+        }
+        else
+        {
+            Write-Output $o
+        }
+    }
+    catch 
+    {
+        Write-Log "[Error] `"$Command`" failed. $_"
+    }
+
+    <#
+    try
+    {
         Invoke-Expression $Command
     }
     catch 
@@ -481,6 +487,7 @@ function RunCommand
         # Log error and continue
         Write-Log $_
     }
+    #>
 }
  
 <#
@@ -527,7 +534,7 @@ function Run
             Write-Log "Pipeline input has already $($allExchangeServers.Count) objects. Skipping `"$Command`""                        
         }
         elseif (!$Servers -and $ExecuteWhenNoServers)
-        {         
+        {
             foreach ($o in @(RunCommand $Command))
             {
                 # Check duplicates
@@ -566,7 +573,7 @@ function Run
                     }
 
                     $result.Add($entry)                      
-                }
+                }                
             }
         }
 
@@ -876,7 +883,7 @@ function Collect-EventLogs
 
         Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $computer ..."
 
-        # Detect machine-local Window's TEMP path (i,e, C:\Windows\Temp)
+        # Detect machine-local Window's TEMP path (i.e. C:\Windows\Temp)
         # Logs are saved here temporarily and will be moved to Path
         $win32os = Get-WmiObject win32_operatingsystem -ComputerName:$computer
         if (!$win32os)
@@ -887,7 +894,8 @@ function Collect-EventLogs
         }
 
         # This is remote machine's path
-        $localPath = Join-Path $win32os.WindowsDirectory -ChildPath "Temp\EventLogs"
+        $currentDateTime = Get-Date -Format "yyyyMMdd_HHmmss"
+        $localPath = Join-Path $win32os.WindowsDirectory -ChildPath "Temp\EventLogs_$currentDateTime"
         $uncPath = "\\$computer\" + $localPath.Replace(':','$') 
         if (!(Test-Path $uncPath))
         {
@@ -908,15 +916,6 @@ function Collect-EventLogs
             $uncFilePath = "\\$computer\" + $localFilePath.Replace(':','$')    
 
             wevtutil epl $log $localFilePath /ow /r:$computer 
-            # save as csv
-            <#
-            if ($log -eq "Application")
-            {                                
-                $csvFilePath = Join-Path $savePath -ChildPath "Application.csv"
-                #Get-WinEvent Application | select -Property LevelDisplayName, TimeCreated, ProviderName, Id, TaskDisplayName, Message | Export-Csv -NoTypeInformation  -Path .\test.csv
-                Get-Eventlog Application | select -Property EntryType, TimeGenerated, Source, EventID, Category, Message | Export-Csv -NoTypeInformation -Path $csvFilePath
-            }
-            #>
         }
 
         # Try to zip up before copying in order to save bandwidth.
@@ -1179,15 +1178,34 @@ function Get-IISWebBinding
     param(
     $Server
     )
-   
+    
+    $block = {       
+        $err = Import-Module WebAdministration 2>&1
+        if ($err)
+        {
+            Write-Error "Import-Module WebAdministration failed."
+        }
+        else
+        {
+            Get-WebBinding
+        }
+    }
+
+    if ($Server -eq $env:COMPUTERNAME)
+    {        
+        Invoke-Command -ScriptBlock $block
+        return
+    }
+    
     $sess = New-PSSession -ComputerName $server -ErrorAction SilentlyContinue 
     if (-not $sess)
     {
-        Write-Log "[$($MyInvocation.MyCommand)] failed to create a remote session to $server"
-        continue
+        Write-Error "Failed to create a remote session to $server."
+        return
     }
-
-    Invoke-Command -Session $sess {Import-Module WebAdministration; Get-WebBinding}    
+        
+    Invoke-Command -Session $sess -ScriptBlock $block
+    Remove-PSSession $sess
 }
 
 <#
@@ -1354,6 +1372,7 @@ Run Get-OutlookProvider
 Run Get-OwaMailboxPolicy
 Run Get-ResourceConfig
 Run Get-SmimeConfig
+Run Get-UserPrincipalNamesSuffix
 Write-Log "Org done"
 
 # ActiveSync
