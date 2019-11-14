@@ -7,7 +7,7 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 より詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2019-05-31/Collect-ExchangeInfo.ps1)
+[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2019-08-08/Collect-ExchangeInfo.ps1)
 
 # 実行例
 1.  Active Directory 上の構成情報のみを取得します。
