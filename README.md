@@ -24,4 +24,4 @@ Load-Clixml.ps1 contains a function "Load-Clixml" which simply imports all xml f
 After you download the ps1 file, make sure to "Unblock":
 
 1. Right-click the ps1 file and click [Property]
-2. In the [General] tab, if you see "This file came from another computer and might be blocked to help protect this computer], check [Unblock]
+2. In the [General] tab, if you see "This file came from another computer and might be blocked to help protect this computer", check [Unblock]
