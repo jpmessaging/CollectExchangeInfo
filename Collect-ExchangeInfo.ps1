@@ -95,7 +95,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2019-11-15"
+$version = "2019-11-26"
 #requires -Version 2.0
 
 <#
@@ -1217,11 +1217,11 @@ function Save-PerfmonLog {
             Copy-Item $file -Destination $savePath
             $count++
         }
-    }    
+    }
 
     if ($uncWinTempPerfmonPath) {
         Remove-Item $uncWinTempPerfmonPath -Force -Recurse -ErrorAction SilentlyContinue
-    }    
+    }
 }
 
 
@@ -1239,7 +1239,10 @@ $cmd = Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue
 if (-not $cmd) {
     throw "Get-OrganizationConfig is not available. Please run with Exchange Remote PowerShell session"
 }
-$OrgName = (Get-OrganizationConfig).Name
+$OrgConfig = Get-OrganizationConfig
+$OrgName = $orgConfig.Name
+$IsExchangeOnline = $orgConfig.LegacyExchangeDN.StartsWith('/o=ExchangeLabs')
+
 
 # Create a temporary folder to store data
 $tempFolder = New-Item $(Join-Path $Path -ChildPath $([Guid]::NewGuid().ToString())) -ItemType directory -ErrorAction Stop
@@ -1251,8 +1254,9 @@ $logPath = Join-Path -Path $tempFolder.FullName -ChildPath $logFileName
 
 $lastLogTime = $null
 Write-Log "Organization Name = $OrgName"
-Write-Log "Script Version=$version"
-Write-Log "COMPUTERNAME=$env:COMPUTERNAME"
+Write-Log "Script Version = $version"
+Write-Log "COMPUTERNAME = $env:COMPUTERNAME"
+Write-Log "IsExchangeOnline = $IsExchangeOnline"
 
 # Log parameters (raw values are in $PSBoundParameters, but want fixed-up values (e.g. Path)
 $sb = New-Object System.Text.StringBuilder
@@ -1280,7 +1284,7 @@ if ($Servers -and -not (Get-Command Get-ExchangeServer -ErrorAction SilentlyCont
 $directAccessCandidates =@(
     foreach ($server in $Servers) {
         # $Server's value might be something like "e2013*" and matches multiple Servers
-        $exServers = @(Get-ExchangeServer $server)
+        $exServers = @(Get-ExchangeServer $server -ErrorAction SilentlyContinue)
 
         if (-not $exServers.Count) {
             Write-Log "Get-ExchangeServer did not find any Server matching '$Server'"
@@ -1289,6 +1293,12 @@ $directAccessCandidates =@(
         foreach ($exServer in $exServers) {
             # In PowerShellv2. $exServer may be $null.
             if (-not $exServer) {
+                continue
+            }
+
+            # Skip Edge servers unless it's the local server.
+            if ($exServer.IsEdgeServer -and $env:COMPUTERNAME -ne $exServer.Name) {
+                Write-Log "Dropping $($exServer.Name) from directAccessCandidates since it's an Edge server"
                 continue
             }
 
@@ -1535,8 +1545,6 @@ Run "Get-Mailbox -Arbitration" -PassThru | Save-Object -Name 'Mailbox-Arbitratio
 Run "Get-Mailbox -Monitoring" -PassThru | Save-Object -Name 'Mailbox-Monitoring'
 Run "Get-Mailbox -PublicFolder" -PassThru | Save-Object -Name 'Mailbox-PublicFolder'
 Run Get-UMService
-Run "Get-SPN -Path:$Path"
-
 
 # FIPS
 Run Get-MalwareFilteringServer
@@ -1577,9 +1585,16 @@ Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAcc
 
 #Run "Get-WmiObject Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -ExecuteWhenNoServers:$false
 
-# Ldife for Exchange Org
-Write-Progress -Activity $collectionActivity -Status:"Running Ldifde" -PercentComplete:90
-Run "Invoke-Ldifde -Path:$Path"
+if ($IsExchangeOnline) {
+    Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
+}
+else {
+    Run "Get-SPN -Path:$Path"
+
+    # Ldife for Exchange Org
+    Write-Progress -Activity $collectionActivity -Status:"Running Ldifde" -PercentComplete:90
+    Run "Invoke-Ldifde -Path:$Path"
+}
 
 # Collect EventLogs
 if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
@@ -1608,7 +1623,7 @@ if ($Script:errs.Count) {
     if (-not (Test-Path errPath)) {
         New-Item $errPath -ItemType Directory -ErrorAction Stop | Out-Null
     }
-    $errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5 
+    $errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
 }
 
 } # end of try for transcript
