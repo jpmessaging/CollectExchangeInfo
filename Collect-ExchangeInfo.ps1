@@ -95,7 +95,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2019-11-26"
+$version = "2019-12-25"
 #requires -Version 2.0
 
 <#
@@ -491,10 +491,10 @@ function Run {
         [string]$Command,
         [string[]]$Servers,
         [string]$Identifier = "Server",
-        [bool]$ExecuteWhenNoServers = $true,
+        [switch]$SkipIfNoServers,
         [Parameter(ValueFromPipeline=$true)]
         [object[]]$ResultCollection,
-        [bool]$AllowDuplicate = $true,
+        [switch]$RemoveDuplicate,
         [switch]$PassThru
     )
 
@@ -513,40 +513,64 @@ function Run {
     }
 
     end {
-        if ($allExchangeServers.Count -gt 0 -and $ResultCollection.Count -ge $allExchangeServers.Count) {
-            Write-Log "Pipeline input has already $($allExchangeServers.Count) objects. Skipping `"$Command`""
-        }
-        elseif (-not $Servers.Count -and $ExecuteWhenNoServers) {
-            foreach ($o in @(RunCommand $Command)) {
-                # Check duplicates
-                if (-not $AllowDuplicate) {
-                    $dups = @($result | Where-Object {$_.Distinguishedname -eq $o.Distinguishedname})
-                    if ($dups.Count -gt 0) {
-                        # this is a duplicate. skip.
-                        Write-Log "`"dropping a duplicate: '$($o.Distinguishedname)'`""
-                        continue
-                    }
-                }
-                $result.Add($o)
+        $temp = @(
+            if (-not $Servers.Count -and -not $SkipIfNoServers) {
+                RunCommand $Command
             }
-        }
-        elseif ($Servers) {
-            foreach ($Server in $Servers) {
-                $firstTimeAddingServerName = $true
-                foreach ($entry in @(RunCommand "$Command -$Identifier $Server")) {
-                    # Add ServerName prop if not exist already (but log only the first time per cmdlet)
-                    if (!$entry.ServerName -and !$entry.Server -and !$entry.ServerFqdn -and !$entry.MailboxServer -and !$entry.Fqdn) {
-                        if ($firstTimeAddingServerName) {
-                            Write-Log "Adding ServerName to the result of '$Command -$Identifier $Server'"
-                            $firstTimeAddingServerName = $false
+            elseif ($Servers) {
+                foreach ($Server in $Servers) {
+                    $firstTimeAddingServerName = $true
+                    foreach ($entry in @(RunCommand "$Command -$Identifier $Server")) {
+                        # Add ServerName prop if not exist already (but log only the first time per cmdlet)
+                        if (!$entry.ServerName -and !$entry.Server -and !$entry.ServerFqdn -and !$entry.MailboxServer -and !$entry.Fqdn) {
+                            if ($firstTimeAddingServerName) {
+                                Write-Log "Adding ServerName to the result of '$Command -$Identifier $Server'"
+                                $firstTimeAddingServerName = $false
+                            }
+                            # This is for PowerShell V2
+                            # $entry | Add-Member -Type NoteProperty -Name:ServerName -Value:$Server
+                            $entry = $entry | Select-Object *, @{N='ServerName';E={$Server}}
                         }
 
-                        # This is for PowerShell V2
-                        # $entry | Add-Member -Type NoteProperty -Name:ServerName -Value:$Server
-                        $entry = $entry | Select-Object *, @{N='ServerName';E={$Server}}
+                        $entry
                     }
+                }
+            }
+        )
 
-                    $result.Add($entry)
+        if (-not $RemoveDuplicate) {
+            $result.AddRange($temp)
+        }
+        else {
+            # Check duplicates
+            foreach ($o in $temp) {
+
+                if ($skipDupCheck) {
+                    $result.Add($o)
+                    continue
+                }
+
+                # Do a duplicate check based on this property
+                if ($o.Distinguishedname) {
+                    $dupCheckProp = 'Distinguishedname'
+                }
+                elseif ($o.Identity) {
+                    $dupCheckProp = 'Identity'
+                }
+                else {
+                    Write-Log "Cannot perform duplicate check because the results of '$($Command)' do not have Distinguishedname nor Identity."
+                    $skipDupCheck = $true
+                    $result.Add($o)
+                    continue
+                }
+
+                $dups = @($result | Where-Object {$_.$dupCheckProp.ToString() -eq $o.$dupCheckProp.ToString()})
+
+                if ($dups.Count) {
+                    Write-Log "`"dropping a duplicate: '$($o.$dupCheckProp.ToString())'`""
+                }
+                else {
+                    $result.Add($o)
                 }
             }
         }
@@ -555,7 +579,7 @@ function Run {
             Write-Output $result
         }
         else {
-            # Extract cmdlet name (e..g "Get-MailboxDatabase" -> "MailboxDatabase")
+            # Extract cmdlet name (e.g "Get-MailboxDatabase" -> "MailboxDatabase")
             $Command.Split(' ')[0] -match ".*-(?<cmdName>.*)" | Out-Null
             $commandName = $Matches['cmdName']
             Save-Object $result -Name $commandName
@@ -610,20 +634,20 @@ function Get-VirtualDirectory {
         if ($command.Parameters -and $command.Parameters.ContainsKey('ShowMailboxVirtualDirectories')) {
             # if IncludeIISVirtualDirectories, then access direct access servers. otherwise, don't touch servers (only AD)
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -ExecuteWhenNoServers:$false -PassThru |
-                    Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -AllowDuplicate:$false
+                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+                    Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
             }
             else {
-                Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -AllowDuplicate:$false
+                Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
             }
         }
         else {
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -ExecuteWhenNoServers:$false -PassThru |
-                    Run "$($command.Name) -ADPropertiesOnly" -AllowDuplicate:$false
+                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+                    Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
             }
             else {
-                Run "$($command.Name) -ADPropertiesOnly" -AllowDuplicate:$false
+                Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
             }
         }
     }
@@ -1415,11 +1439,11 @@ Run Get-EdgeSyncServiceConfig
 Run Get-EmailAddressPolicy
 Run Get-HostedContentFilterRule
 Run Get-IPAllowListConfig
-Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -ExecuteWhenNoServers:$false
+Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
 Run Get-IPAllowListProvider
 Run Get-IPAllowListProvidersConfig
 Run Get-IPBlockListConfig
-Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -ExecuteWhenNoServers:$false
+Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
 Run Get-IPBlockListProvider
 Run Get-IPBlockListProvidersConfig
 Run Get-JournalRule
@@ -1459,8 +1483,8 @@ Run Get-ExchangeServer
 Run Get-MailboxServer
 
 # For CAS (>= E14) in DAS list, include ASA info
-Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object {$_.IsDirectAccess -and $_.IsClientAccessServer -and -$_.IsE14OrLater}) -Identifier:Identity -ExecuteWhenNoServers:$false -PassThru |
-    Run "Get-ClientAccessServer -WarningAction:SilentlyContinue" -Identifier:Identity -AllowDuplicate:$false
+Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object {$_.IsDirectAccess -and $_.IsClientAccessServer -and -$_.IsE14OrLater}) -Identifier:Identity -SkipIfNoServers -RemoveDuplicate -PassThru |
+    Run "Get-ClientAccessServer -WarningAction:SilentlyContinue" -Identifier:Identity -RemoveDuplicate
 
 Run Get-ClientAccessArray
 Run Get-RpcClientAccess
@@ -1478,13 +1502,13 @@ Write-Log "Server Done"
 # Database
 Write-Progress -Activity $collectionActivity -Status:"Database Settings" -PercentComplete:50
 
-Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -ExecuteWhenNoServers:$false -PassThru |
-    Run "Get-MailboxDatabase -IncludePreExchange" -AllowDuplicate:$false
+Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+    Run "Get-MailboxDatabase -IncludePreExchange" -RemoveDuplicate
 
-Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -ExecuteWhenNoServers:$false -PassThru |
-    Run "Get-PublicFolderDatabase" -AllowDuplicate:$false
+Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+    Run "Get-PublicFolderDatabase" -RemoveDuplicate
 
-Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer}) -ExecuteWhenNoServers:$false
+Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer}) -SkipIfNoServers
 Get-DAG
 Run Get-DatabaseAvailabilityGroupConfiguration
 if (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction:SilentlyContinue) {
@@ -1495,16 +1519,16 @@ Write-Log "Database Done"
 # Virtual Directories
 Write-Progress -Activity $collectionActivity -Status:"Virtual Directory Settings" -PercentComplete:60
 Run 'Get-VirtualDirectory'
-Run "Get-IISWebBinding" -Servers $directAccessServers -ExecuteWhenNoServers:$false -PassThru | Save-Object -Name WebBinding
+Run "Get-IISWebBinding" -Servers $directAccessServers -SkipIfNoServers -PassThru | Save-Object -Name WebBinding
 
 # Active Monitoring & Managed Availability
 Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:70
 Run Get-GlobalMonitoringOverride
-Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater})  -ExecuteWhenNoServers:$false
-Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -ExecuteWhenNoServers:$false
-Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -ExecuteWhenNoServers:$false
-Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -ExecuteWhenNoServers:$false
-Run Test-ServiceHealth -Servers:$directAccessServers -ExecuteWhenNoServers:$false
+Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+Run Test-ServiceHealth -Servers:$directAccessServers -SkipIfNoServers
 
 # Federation & Hybrid
 Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:75
@@ -1521,7 +1545,7 @@ Run Get-OutboundConnector
 
 # Exchange Certificate
 Write-Progress -Activity $collectionActivity -Status:"Exchange Certificate" -PercentComplete:80
-Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater}) -ExecuteWhenNoServers:$false
+Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater}) -SkipIfNoServers
 
 # Throttling
 Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
@@ -1532,8 +1556,8 @@ Run Get-ThrottlingPolicyAssociation
 Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
 Run Get-MigrationConfig
 Run Get-MigrationEndpoint
-Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity -ExecuteWhenNoServers:$false
-Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine -ExecuteWhenNoServers:$false
+Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity -SkipIfNoServers
+Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine -SkipIfNoServers
 Run Get-OutlookProtectionRule
 Run Get-PolicyTipConfig
 Run Get-RbacDiagnosticInfo
@@ -1552,7 +1576,7 @@ Run Get-MalwareFilterPolicy
 Run Get-MalwareFilterRule
 if ($IncludeFIPS) {
     Write-Progress -Activity $collectionActivity -Status:"FIPS" -PercentComplete:85
-    Run Invoke-FIPSCommand -Servers ($directAccessServers | Where-Object {$_.IsE15OrLater -and $_.IsHubTransportServer}) -ExecuteWhenNoServers:$false
+    Run Invoke-FIPSCommand -Servers ($directAccessServers | Where-Object {$_.IsE15OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
 }
 
 Run Get-HostedConnectionFilterPolicy
@@ -1563,27 +1587,27 @@ Run Get-AntiPhishRule
 Run "Get-PhishFilterPolicy -SpoofAllowBlockList -Detailed"
 
 # .NET Framework Versions
-Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server -ExecuteWhenNoServers:$false
+Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server -SkipIfNoServers
 
 # TLS Settings
-Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server -ExecuteWhenNoServers:$false
+Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
 
 # TCPIP6
-Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -ExecuteWhenNoServers:$false
+Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
 
 # MSInfo32
 # Get-MSInfo32 -Servers $directAccessServers
 
 # WMI
 # Win32_powerplan is available in Win7 & above.
-Run 'Get-WmiObject -namespace root\cimv2\power -class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -ExecuteWhenNoServers $false -PassThru | Save-Object -Name Win32_PowerPlan
-Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -ExecuteWhenNoServers $false -PassThru | Save-Object -Name Win32_PageFileSetting
-Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -ExecuteWhenNoServers $false -PassThru | Save-Object -Name Win32_ComputerSystem
-Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -ExecuteWhenNoServers $false -PassThru | Save-Object -Name Win32_OperatingSystem
-Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -ExecuteWhenNoServers:$false -PassThru |
+Run 'Get-WmiObject -namespace root\cimv2\power -class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PowerPlan
+Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PageFileSetting
+Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_ComputerSystem
+Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_OperatingSystem
+Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru |
     Where-Object {$_.IPEnabled} | Save-Object -Name Win32_NetworkAdapterConfiguration
 
-#Run "Get-WmiObject Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -ExecuteWhenNoServers:$false
+#Run "Get-WmiObject Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
@@ -1614,7 +1638,7 @@ if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
 # Collect Perfmon Log
 if ($IncludePerformanceLog) {
     Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
-    Run "Save-PerfmonLog -Path:$(Join-Path $Path 'Perfmon')" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -ExecuteWhenNoServers:$false
+    Run "Save-PerfmonLog -Path:$(Join-Path $Path 'Perfmon')" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 }
 
 # Save errors
