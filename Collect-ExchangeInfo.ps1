@@ -37,16 +37,36 @@ Note: Connectivity for each server is checked by ping before running any Exchang
 If a server fails on connectivity test, it won't be accessed for the rest of execution.
 
 .PARAMETER IncludeFIPS
-Switch to include FIPS (Forefront Information Protection Service) related information.
+Switch to include FIPS (Forefront Information Protection Service) related information from the servers specified in "Servers" parameter.
 
 .PARAMETER IncludeEventLogs
-Switch to include Application & System event logs on the servers specified in "Servers" parameter.
+Switch to include Application & System event logs from the servers specified in "Servers" parameter.
 
 .PARAMETER IncludeEventLogsWithCrimson
-Switch to include Exchange-related Crimson logs ("Microsoft-Exchange-*") as well as Application & System event logs on the servers specified in "Servers" parameter.
+Switch to include Exchange-related Crimson logs ("Microsoft-Exchange-*") as well as Application & System event logs from the servers specified in "Servers" parameter.
 
 .PARAMETER IncludePerformanceLog
-Switch to include Exchange's Perfmon log (Only Exchange 2013 and above collects perfmon log by default)
+Switch to include Exchange's Perfmon log from the servers specified in "Servers" parameter (Only Exchange 2013 and above collects perfmon log by default).
+
+.PARAMETER IncludeIISLog
+Switch to include IIS log from the servers specified in "Servers" parameter.
+
+.PARAMETER IncludeExchangeLog
+List of log folders unders %ExchangeInstallPath%Logging to collect from the servers specified in "Servers" parameter.
+
+.PARAMETER IncludeTransportLog
+List of transport-related log folders to collect from the servers specified in "Servers" parameter (e.g. Connectivity, MessagingTracing etc)
+
+.PARAMETER IncludeFastSearchLog
+Switch to include FAST Search log from the servers specified in "Servers" parameter
+
+.PARAMETER FromDateTime
+Log files whose LastWriteTime is greater than or equal to this value are collected for the following log types:
+IncludePerformanceLog, IncludeIISLog, IncludeExchangeLog, IncludeTransportLog, and IncludeFastSearchLog.
+
+.PARAMETER ToDateTime
+Log files whose LastWriteTime is less than or equal to this value are collected for the following log types:
+IncludePerformanceLog, IncludeIISLog, IncludeExchangeLog, IncludeTransportLog, and IncludeFastSearchLog.
 
 .PARAMETER KeepOutputFiles
 Switch to keep the output files. If this is not specified, all the output files will be deleted after being packed to a zip file.
@@ -74,6 +94,8 @@ Create (if not exist) C:\exinfo and save output files there.
 Exchange Servers matching "EX-*" will be directly accessed and their event logs including Exchange's crimson logs will be collected.
 
 .NOTES
+See https://github.com/jpmessaging/CollectExchangeInfo
+
 Copyright 2020 Ryusuke Fujita
 
 This software is released under the MIT License.
@@ -96,10 +118,17 @@ param (
     [switch]$IncludeEventLogsWithCrimson,
     [switch]$IncludeIISVirtualDirectories,
     [switch]$IncludePerformanceLog,
+    [switch]$IncludeIISLog,
+    [string[]]$IncludeExchangeLog,
+    [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable')]
+    [string[]]$IncludeTransportLog,
+    [switch]$IncludeFastSearchLog,
+    [Nullable[DateTime]]$FromDateTime,
+    [Nullable[DateTime]]$ToDateTime,
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-01-09"
+$version = "2020-02-18"
 #requires -Version 2.0
 
 <#
@@ -135,13 +164,6 @@ function Save-Object {
             if ($null -eq $o) {
                 return
             }
-            <#
-            elseif($o -is [string])
-            {
-                # assume a string object is an error and write it to log
-                Write-Log $o
-            }
-            #>
             else {
                 if (-not($objectName)) {
                     $objectName = $o.GetType().Name
@@ -166,9 +188,6 @@ function Save-Object {
     }
 }
 
-<#
-  Compress a folder and create a zip file.
-#>
 function Compress-Folder {
     [CmdletBinding()]
     param(
@@ -177,10 +196,16 @@ function Compress-Folder {
         [string]$Path,
         [string]$Destination,
         [string]$ZipFileName,
+        [Nullable[DateTime]]$FromDateTime,
+        [Nullable[DateTime]]$ToDateTime,
         [switch]$IncludeDateTime,
         [switch]$RemoveFiles,
         [switch]$UseShellApplication
     )
+
+    if (-not (Test-Path $Path)) {
+        throw [System.IO.DirectoryNotFoundException]"Path '$Path' is not found"
+    }
 
     $Path = Resolve-Path $Path
     $zipFileNameWithouExt = [System.IO.Path]::GetFileNameWithoutExtension($ZipFileName)
@@ -203,6 +228,12 @@ function Compress-Folder {
     $Destination = Resolve-Path $Destination
     $zipFilePath = Join-Path $Destination -ChildPath $zipFileName
 
+    if (Test-Path $zipFilePath) {
+        # Append a randome string to the zip file name.
+        $zipFileName = $zipFileNameWithouExt + "_" + [System.IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
+        $zipFilePath = Join-Path $Destination -ChildPath $zipFileName
+    }
+
     $NETFileSystemAvailable = $false
 
     try {
@@ -214,6 +245,26 @@ function Compress-Folder {
         Write-Warning "System.IO.Compression.FileSystem wasn't found. Using alternate method"
     }
 
+    $files = @(Get-ChildItem $Path -Recurse | Where-Object {-not $_.PSIsContainer})
+
+    # Apply filters
+    if ($FromDateTime)  {
+        $files = $files | Where-Object {$_.LastWriteTime -ge $FromDateTime}
+    }
+
+    if ($ToDateTime) {
+        $files = $files | Where-Object {$_.LastWriteTime -le $ToDateTime}
+    }
+
+    # If there's no files, bail.
+    if ($files.Count -eq 0) {        
+        New-Object PSCustomObject -Property @{
+            ZipFilePath = $null
+            FilesRemoved = $false
+        }
+        return
+    }
+
     if ($NETFileSystemAvailable -and $UseShellApplication -eq $false) {
         # Note: [System.IO.Compression.ZipFile]::CreateFromDirectory() fails when one or more files in the directory is locked.
         #[System.IO.Compression.ZipFile]::CreateFromDirectory($Path, $zipFilePath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
@@ -223,8 +274,6 @@ function Compress-Folder {
 
             $zipStream = New-Object System.IO.FileStream -ArgumentList $zipFilePath, ([IO.FileMode]::Open)
             $zipArchive = New-Object System.IO.Compression.ZipArchive -ArgumentList $zipStream, ([IO.Compression.ZipArchiveMode]::Create)
-
-            $files = @(Get-ChildItem $Path -Recurse | Where-Object {-not $_.PSIsContainer})
             $count = 0
 
             foreach ($file in $files) {
@@ -261,7 +310,7 @@ function Compress-Folder {
                 $zipStream.Dispose()
             }
 
-            Write-Progress -Activity "Creating a zip file $zipFilePath" -Completed
+            Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Done" -Completed
         }
     }
     else {
@@ -271,11 +320,10 @@ function Compress-Folder {
         $shellApp = New-Object -ComObject Shell.Application
         Set-Content $zipFilePath ("PK" + [char]5 + [char]6 + ("$([char]0)" * 18))
         (Get-Item $zipFilePath).IsReadOnly = $false
-
         $zipFile = $shellApp.NameSpace($zipFilePath)
 
-        # If target folder is empty, CopyHere() fails. So make sure it's not empty
-        if (@(Get-ChildItem $Path).Count -gt 0) {
+        # Add the entire folder.
+        if ($null -eq $FromDateTime -and $null -eq $ToDateTime ) {            
             # Start copying the whole and wait until it's done. CopyHere works asynchronously.
             $zipFile.CopyHere($Path)
 
@@ -301,6 +349,66 @@ function Compress-Folder {
                 }
             }
         }
+        else {            
+            # Copy the files to a temporary folder (with folder hierarchy), and then zip it.
+            $tempPath = Join-Path $(Get-WindowsTempFolder -Server $env:COMPUTERNAME) -ChildPath "$([Guid]::NewGuid().ToString())\$(Split-Path $Path -Leaf)"
+            New-Item $tempPath -ItemType directory -ErrorAction stop | Out-Null            
+
+            try {
+                foreach ($fileInfo in $files) {      
+                    $tempDest = $tempPath             
+                    if ($fileInfo.DirectoryName.Length -gt $Path.Length) {
+                        $folderName = $fileInfo.DirectoryName.Substring($Path.Length + 1)
+                        $tempDest = Join-Path $tempDest -ChildPath $folderName
+                        if (-not (Test-Path $tempDest)) {
+                            New-Item $tempDest -ItemType Directory | Out-Null
+                        }
+                    }
+                    Copy-Item -Path $fileInfo.FullName -Destination $tempDest
+                }
+
+                $zipFile.CopyHere($tempPath)
+
+                # Now wait and poll
+                $inProgress = $true
+                $delaymsec = 20
+                $maxDelaymsec = 200
+
+                Start-Sleep -Milliseconds 200
+
+                while ($inProgress) {
+                    Start-Sleep -Milliseconds $delaymsec
+                    $file = $null
+
+                    try {
+                        $file = [System.IO.File]::Open($zipFilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+                        $inProgress = $false
+                    }
+                    catch [System.IO.IOException] {
+                        Write-Debug $_.Exception.Message
+                    }
+                    finally {
+                        if ($file) {
+                            $file.Close()
+                        }
+                        else {
+                            $delaymsec = $delaymsec * 2
+                            if ($delaymsec -ge $maxDelaymsec) {
+                                $delaymsec = $maxDelaymsec
+                            }
+                        }
+                    }
+                }
+            }
+            finally {
+                # Remove the temporary folder
+                if (Test-Path $tempPath) {                    
+                    Remove-Item (Get-Item $tempPath).Parent.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        } # end of else
+
+        Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Done"  -Completed
     }
 
     if (Test-Path $zipFilePath) {
@@ -319,6 +427,306 @@ function Compress-Folder {
     else {
         throw "Zip file wasn't successfully created at $zipFilePath"
     }
+}
+
+# Convert a local path to UNC path.
+# C:\temp --> \\myServer\C$\temp
+# These functions are meant to be just small helper and not bullet-proof.
+function ConvertTo-UNCPath {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        $Path,
+        [Parameter(Mandatory = $true)]
+        $Server
+    )
+
+    "\\$Server\$($Path.Replace(':', '$'))"
+}
+
+function ConvertFrom-UNCPath {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # Given Path can be a local path or remote path: e.g.
+    # "\\Server\C$\temp\etc\" or "C:\temp\etc"
+    if (-not ($Path -match  '(\\\\(?<Server>[^\\]+)\\)?(?<Path>.*)')) {
+        throw "$Path looks invalid (or bug here)"
+    }
+
+    $server = $Matches['Server']
+    $localPath = $Matches['Path'].Replace('$', ':')
+    New-Object PSCustomObject -Property @{
+        Server = $server
+        LocalPath = $localPath
+    }
+}
+
+function Save-Item {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$SourcePath, # Path to save
+        [Parameter(Mandatory = $true)]
+        $DestitionPath, # Where to save
+        $Filter = '*', # filter works only when copied without zipping first.
+        $ZipFileName,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime,
+        [switch]$SkipZip # Switch to disable make a zip file before copying.
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        throw "$SourcePath is not found"
+    }
+
+    if (-not (Test-Path $DestitionPath)) {
+        New-Item $DestitionPath -ItemType Directory -ErrorAction Stop | Out-Null
+    }
+    $DestitionPath = Resolve-Path $DestitionPath
+
+    $serverAndPath = ConvertFrom-UNCPath $SourcePath
+    $server = $serverAndPath.Server
+    $localPath = $serverAndPath.LocalPath
+
+    # Remember the servers that cannot be zip remotely and skip zipping next time.
+    if (-not $script:SkipZipServers) {
+        $script:SkipZipServers = @{}
+    }
+
+    if ($script:SkipZipServers.ContainsKey($Server)) {
+        $SkipZip = $true
+        Write-Log "[$($MyInvocation.MyCommand)] Skip zipping for $Server"
+    }
+
+    # Try to zip up remotely before copying.
+    $zipCreated = $false
+    if ($server -and $env:COMPUTERNAME -ne $server -and -not $SkipZip) {
+        # Compress & save it to Windows's TEMP path.
+
+        # Form the zip file name
+        if (-not $ZipFileName) {
+            $ZipFileName = $SourcePath.Substring($SourcePath.LastIndexOf('\') + 1)
+        }
+        if (-not ($ZipFileName.EndsWith(".zip"))) {
+            $zipFileName = "$ZipFileName.zip"
+        }
+
+        Write-Progress -Activity "Compressing $localPath on $server" -Status "Started (This might take a while)" -PercentComplete -1
+        try {
+            $winTempPath = Get-WindowsTempFolder -Server $server
+            #$zipResult = Compress-Folder -Path $localPath -Destination $winTempPath -ZipFileName $zipFileName -ErrorAction Stop
+            $zipResult = Invoke-Command -ComputerName $server -ScriptBlock ${function:Compress-Folder} -ArgumentList $localPath,$winTempPath,$zipFileName,$FromDateTime,$ToDateTime -ErrorAction Stop
+            $zipCreated = ($null -ne $zipResult.ZipFilePath)
+        }
+        catch {
+            Write-Error "Cannot create a zip file on $Server. Each log file will be copied. $_"
+            $script:SkipZipServers.Add($Server,$null)
+        }
+
+        Write-Progress -Activity "Compressing $localPath on $Server" -Status "Done" -Completed
+
+    }
+
+    if ($zipCreated) {
+        Write-Progress -Activity "Copying a zip file from $server" -Status "Started (This might take a while)" -PercentComplete -1
+        $uncZipFile = ConvertTo-UNCPath $zipResult.ZipFilePath -Server $server
+        Move-Item $uncZipFile -Destination $DestitionPath
+        Write-Progress -Activity  "Copying a zip file from $server" -Status "Done" -Completed
+    }
+    else {
+        # Manually copy
+        #Copy-Item $SourcePath\* -Destination $DestitionPath -Recurse -Filter $Filter -Force
+        $files = @(Get-ChildItem $SourcePath -Recurse | Where-Object {-not $_.PSIsContainer})
+
+        if ($FromDateTime)  {
+            $files = $files | Where-Object {$_.LastWriteTime -ge $FromDateTime}
+        }
+
+        if ($ToDateTime) {
+            $files = $files | Where-Object {$_.LastWriteTime -le $ToDateTime}
+        }
+
+        foreach ($file in $files) {
+            $destination = Join-Path $DestitionPath $file.Directory.Name
+            if (-not (Test-Path $destination)) {
+                New-Item $destination -ItemType Directory | Out-Null
+            }
+            Copy-Item $file.FullName -Destination $destination -Force
+        }
+
+        if ($files.Count -eq 0) {
+            Write-Log "[$($MyInvocation.MyCommand)] There're no files in $SourcePath from $FromDateTime to $ToDateTime"
+        }
+    }
+}
+
+function Save-IISLog {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        $Path,
+        [Parameter(Mandatory = $true)]
+        $Server,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    # Find the locations of IIS logs on the Server (can be multiple locations)
+    $webSites = @(
+        try {
+            $session = $null
+            $session = New-PSSession -ComputerName $Server -ErrorAction Stop
+            Invoke-Command -Session $session -ScriptBlock {
+                Import-Module WebAdministration
+                $webSites = @(Get-Website)
+                foreach ($webSite in $webSites) {
+                    # The directory might contain environment variable (e.g. %SystemDrive%\inetpub\logs\LogFiles).
+                    $directory = [System.Environment]::ExpandEnvironmentVariables($webSite.logFile.directory)
+                    New-Object PSCustomObject -Property @{
+                        SiteName = $webSite.Name
+                        Directory = $directory
+                    }
+                }
+            }
+            $webSiteFound = $true
+        }
+        catch {
+            # ignored
+        }
+        finally {
+            if ($session) {
+                Remove-PSSession $session
+            }
+        }
+    )
+
+    if ($webSiteFound) {
+        foreach ($webSiteGroup in $($webSites | Group-Object Directory)) {
+            # Form a folder name.
+            # There can be multiple web sites with different log directories. Save each directory to a different locations
+            $folderName = $null
+            foreach ($site in $webSiteGroup.Group) {
+                $folderName += $site.SiteName + '&'
+            }
+            $folderName = $folderName.Remove($folderName.Length - 1)
+            $destination = Join-Path $Path -ChildPath "$Server\$folderName"
+
+            $uncPath = ConvertTo-UNCPath $webSiteGroup.Group[0].Directory -Server $Server
+            Save-Item -SourcePath $uncPath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+        }
+    }
+    else {
+        # Web sites information is not found (maybe PSSession cannot be established)
+        # Try the default IIS log location ('c:\inetpub\logs\LogFiles')
+        $uncPath = ConvertTo-UNCPath 'C:\inetpub\logs\LogFiles' -Server $Server
+        if (Test-Path $uncPath) {
+            $destination = Join-Path $Path -ChildPath $Server
+            Save-Item -SourcePath $uncPath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+        }
+        else {
+            # Give up
+            Write-Error "Cannot find the IIS log directory of server $Server and also cannot find $uncPath"
+        }
+    }
+}
+
+<#
+Save folder under %ExchangeInstallPath%Logging
+#>
+function Save-ExchangeLogging {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        $Path, # destination
+        [Parameter(Mandatory=$true)]
+        $Server,
+        [Parameter(Mandatory=$true)]
+        $FolderPath, # subfolder path under %ExchangeInstallPath%Logging
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    $exchangePath  = Get-ExchangeInstallPath -Server $Server
+    $logPath = Join-Path $exchangePath "Logging\$FolderPath"
+
+    $source = ConvertTo-UNCPath $logPath -Server $Server
+    $destination = Join-path $Path -ChildPath $Server
+    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+}
+
+function Save-TransportLog {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        $Path,
+        [Parameter(Mandatory=$true)]
+        $Server,
+        [Parameter(Mandatory=$true)]
+        [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable')]
+        $Type,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    $transport = $null
+    if (Get-Command 'Get-TransportService' $Server -ErrorAction SilentlyContinue) {
+        $transport = Get-TransportService $Server
+    }
+    elseif (Get-Command 'Get-TransportServer' $Server -ErrorAction SilentlyContinue) {
+        $transport = Get-TransportServer $Server
+    }
+
+    # If both Get-TransportService & Get-TransportServer are not available, bail.
+    if (-not $transport) {
+        throw "Get-TransportService/TransportServer is not available."
+    }
+
+    foreach ($logType in $Type) {
+        # Parameter name is ***LogPath
+        $paramName = $logType + 'LogPath'
+        if (-not $transport.$paramName) {
+            Write-Error "Cannot find $paramName in the result of Get-TransportService"
+            continue
+        }
+        $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
+        $destination = Join-path $Path -ChildPath $Server
+        Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    }
+}
+
+function Save-ExchangeSetupLog {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        $Path,
+        [Parameter(Mandatory=$true)]
+        $Server       
+    )
+
+    $source = ConvertTo-UNCPath 'C:\ExchangeSetupLogs' -Server $Server
+    $destination = Join-path $Path -ChildPath $Server
+    Save-Item -SourcePath $source -DestitionPath $destination
+}
+
+function Save-FastSearchLog {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        $Path,
+        [Parameter(Mandatory=$true)]
+        $Server,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    $exsetupPath = Get-ExchangeInstallPath -Server $Server     
+    $source = ConvertTo-UNCPath $(Join-Path $exsetupPath 'Bin\Search\Ceres\Diagnostics\Logs') -Server $Server
+    $destination = Join-path $Path -ChildPath $Server
+    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 <#
@@ -517,6 +925,21 @@ function Run {
     }
 
     end {
+        # Check if cmdlet is available. If not, bail (RunCommand check the availability of cmdlet. So this is just an optimization)
+        $endOfCmdlet = $Command.IndexOf(" ")
+        if ($endOfCmdlet -lt 0) {
+            $cmdlet = $Command
+        }
+        else {
+            $cmdlet = $Command.Substring(0, $endOfCmdlet)
+        }
+
+        $cmd = Get-Command $cmdlet -ErrorAction:SilentlyContinue
+        if (-not $cmd) {
+            Write-Log "$cmdlet is not available"
+            return
+        }
+
         $temp = @(
             if (-not $Servers.Count -and -not $SkipIfNoServers) {
                 RunCommand $Command
@@ -837,36 +1260,31 @@ function Save-ExchangeEventLog {
         New-Item -ItemType directory $Path -ErrorAction Stop | Out-Null
     }
 
-    # By default, collect app and sys logs
-    $logs = "Application","System"
-
     # Save logs from a server into a separate folder
-    $savePath = Join-Path $Path -ChildPath $Server
-    if (-not (Test-Path $savePath -ErrorAction Stop)) {
-        New-Item -ItemType directory $savePath -ErrorAction Stop | Out-Null
-    }
-
-    Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $Server ..."
-
-    # Detect machine-local Window's TEMP path (i.e. C:\Windows\Temp)
-    # Logs are saved here temporarily and will be moved to savePath
-    $win32os = Get-WmiObject win32_operatingsystem -ComputerName:$Server
-    if (-not $win32os) {
-        throw "Get-WmiObject win32_operatingsystem failed for '$Server'"
+    $destination = Join-Path $Path -ChildPath $Server
+    if (-not (Test-Path $destination)) {
+        New-Item -ItemType directory $destination -ErrorAction Stop | Out-Null
     }
 
     # This is remote machine's path
-    $winTempPath = Join-Path $win32os.WindowsDirectory -ChildPath "Temp"
+    $winTempPath = Get-WindowsTempFolder -Server $Server
     $winTempEventPath = Join-Path $winTempPath -ChildPath "EventLogs_$(Get-Date -Format "yyyyMMdd_HHmmss")"
-    $uncWinTempEventPath = Join-Path "\\$Server\" -ChildPath $winTempEventPath.Replace(':','$')
+    $uncWinTempEventPath = ConvertTo-UNCPath $winTempEventPath -Server $Server
 
     if (-not (Test-Path $uncWinTempEventPath -ErrorAction Stop)) {
         New-Item $uncWinTempEventPath -ItemType Directory -ErrorAction Stop | Out-Null
     }
 
+    Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $Server ..."
+    # By default, collect app and sys logs
+    $logs = "Application","System"
+
     # Add crimson logs if requested
     if ($IncludeCrimsonLogs) {
-        $logs += (wevtutil el /r:$Server) -like "Microsoft-Exchange*"
+        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Exchange*'
+
+        # This is for the FAST Search.
+        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Office Server*' 
     }
 
     foreach ($log in $logs) {
@@ -877,40 +1295,70 @@ function Save-ExchangeEventLog {
         wevtutil epl $log $localFilePath /ow /r:$Server
     }
 
-    # Try to zip up before copying in order to save bandwidth unless:
-    # - $SkipZip is specified by the caller
-    # - Target server is the local machine
-    # This is possible only if remote management is enabled on the remote machine (i.e. winrm quickconfig)
-    $zipFileName = "EventLogs_$Server.zip"
-    $zipCreated = $false
+    Save-Item -SourcePath $uncWinTempEventPath -DestitionPath $destination
+    Remove-Item $uncWinTempEventPath -Recurse -Force -ErrorAction SilentlyContinue
+}
 
-    if (-not $SkipZip -and $env:COMPUTERNAME -ne $Server) {
-        try {
-            $destination = Join-Path $winTempPath -ChildPath $([Guid]::NewGuid())
-            $zipResult = Invoke-Command -ComputerName $Server -ScriptBlock ${function:Compress-Folder} -ArgumentList $winTempEventPath, $destination, $zipFileName -ErrorAction Stop
-            $zipCreated = $true
-        }
-        catch {
-            Write-Error "Cannot create a zip file on $Server. Each event log file will be copied. $_"
-        }
+<#
+Return the Windows' TEMP folder for a given server.
+This function will throw on failure.
+#>
+function Get-WindowsTempFolder {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        $Server
+    )
+
+    # Cache the result of WMI
+    if ($null -eq $Script:Win32OSCache) {
+        $Script:Win32OSCache = @{}
     }
 
-    if ($zipCreated) {
-        Write-Log "[$($MyInvocation.MyCommand)] Copying a zip file '$zipFileName' from $Server"
-        $uncZipFilePath = Join-Path "\\$Server\" -ChildPath $zipResult.ZipFilePath.Replace(':','$')
-        Move-Item $uncZipFilePath -Destination $savePath -Force
-        Remove-Item $([IO.Path]::GetDirectoryName($uncZipFilePath)) -Force -ErrorAction SilentlyContinue
+    if ($Script:Win32OSCache.ContainsKey($Server)) {
+        $win32os = $Script:Win32OSCache[$Server]
     }
     else {
-        Write-Log "[$($MyInvocation.MyCommand)] Copying *.evtx files from $Server"
-        $evtxFiles = Get-ChildItem -Path $uncWinTempEventPath -Filter '*.evtx'
-        foreach ($file in $evtxFiles) {
-            Move-Item $file.FullName -Destination $savePath -Force
+        $win32os = Get-WmiObject win32_operatingsystem -ComputerName $Server
+        if (-not $win32os) {
+            throw "Get-WmiObject win32_operatingsystem failed for '$Server'"
         }
+        $Script:Win32OSCache.Add($Server, $win32os)
     }
 
-    # Clean up
-    Remove-Item $uncWinTempEventPath -Recurse -Force -ErrorAction SilentlyContinue
+    Join-Path $win32os.WindowsDirectory -ChildPath "Temp"
+}
+
+<#
+Return the value of ExchangeInstallPath environment variable for a given server.
+This function will throw on failure.
+#>
+function Get-ExchangeInstallPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        $Server
+    )
+
+    # Cache the result of WMI win32_environment
+    if ($null -eq $Script:Win32EnvCache) {
+        $Script:Win32EnvCache = @{}
+    }
+
+    if ($Script:Win32EnvCache.ContainsKey($Server)) {
+        $win32env = $Script:Win32EnvCache[$Server]
+    }
+    else {
+        $win32env = Get-WmiObject win32_environment -ComputerName $Server
+        $Script:Win32EnvCache.Add($Server, $win32env)
+    }
+
+    $exchangePath = $win32env | Where-Object {$_.Name -eq 'ExchangeInstallPath'}
+    if (-not $exchangePath) {
+        throw "Cannt find ExchangeInstallPath on $Server"
+    }
+
+    $exchangePath.VariableValue
 }
 
 function Get-DAG {
@@ -1171,91 +1619,32 @@ function Get-IISWebBinding {
     end{}
 }
 
-function Save-PerfmonLog {
+function Get-ExSetupVersion {
     [CmdletBinding()]
     param(
-        $Path,
-        $Server,
-        [switch]$SkipZip
+        $Server
     )
 
-    if (-not (Test-Path $Path)){
-        New-Item $Path -ItemType Directory -ErrorAction Stop | Out-Null
-    }
-
-    # Save logs from a Server into a separate folder
-    $savePath = Join-Path $Path -ChildPath $Server
-    if (-not (Test-Path $savePath -ErrorAction Stop)) {
-        New-Item -ItemType directory $savePath -ErrorAction Stop | Out-Null
-    }
-
-    # Find the perfmon path on the remote machine
-    $win32os = Get-WmiObject win32_operatingsystem -ComputerName $Server
-    $win32env = Get-WmiObject win32_environment -ComputerName $Server
-    if (-not $win32os -or -not $win32env) {
-        # WMI failed. Maybe wrong Server name?
-        throw "Get-WmiObject win32_operatingsystem or win32_environment failed for '$Server'"
-    }
-
-    # This is remote machine's paths
-    $exchangePath = $win32env | Where-Object {$_.Name -eq 'ExchangeInstallPath'}
-    if ($exchangePath) {
-        $perfmonPath = Join-Path $exchangePath.VariableValue "Logging\Diagnostics\DailyPerformanceLogs"
-    }
-    else {
-        throw "Cannt find ExchangeInstallPath on $Server"
-    }
-
-    # Try to compress before copying unless:
-    # - $SkipZip is specified by the caller
-    # - Target server is the local machine
-    $zipCreated = $false
-    if (-not $SkipZip -and $env:COMPUTERNAME -ne $Server) {
-        # Compess the perfmon logs & save it to Windows's TEMP path.
-        $winTempPath = Join-Path $win32os.WindowsDirectory -ChildPath "Temp"
-        $winTempPerfmonPath = Join-Path $winTempPath -ChildPath "Perfmon_$(Get-Date -Format "yyyyMMdd_HHmmss")"
-        $uncWinTempPerfmonPath = "\\$Server\" + $winTempPerfmonPath.Replace(':','$')
-
-        $zipFileName = "Perfmon_$Server.zip"
-
-        try {
-            Write-Progress -Activity "Compressing perfmon logs on $Server" -Status "Started (This might take a while)" -PercentComplete -1
-            $zipResult = Invoke-Command -ComputerName $Server -ScriptBlock ${function:Compress-Folder} -ArgumentList $perfmonPath,$winTempPerfmonPath,$zipFileName -ErrorAction Stop
-            Write-Progress -Activity "Compressing perfmon logs on $Server" -Status "Done" -Completed
-            $zipCreated = $true
-        }
-        catch {
-            Write-Error "Cannot create a zip file on $Server. Each event log file will be copied. $_"
-        }
-    }
-
-    if ($zipCreated) {
-        Write-Progress -Activity "Copying a perfmon zip file from $Server" -Status "Started (This might take a while)" -PercentComplete -1
-        $uncZipFilePath = Join-Path "\\$Server\" -ChildPath $zipResult.ZipFilePath.Replace(':','$')
-        Move-Item $uncZipFilePath -Destination $savePath
-        Write-Progress -Activity "Copying a perfmon zip file from $Server" -Status "Done" -Completed
-    }
-    else {
-        # Manually copy perfmon logs
-        $uncPerfmonPath = Join-Path "\\$Server\" -ChildPath $perfmonPath.Replace(':', '$')
-        $count = 1
-        $files = @(Get-ChildItem -Path "$uncPerfmonPath\*" -Include "*.blg")
-        foreach ($file in $files) {
-            Write-Progress -Activity "Copying perfmon logs from $Server" -Status "$count/$($files.Count)" -PercentComplete $($count/$files.Count*100)
-            Copy-Item $file -Destination $savePath
-            $count++
-        }
-    }
-
-    if ($uncWinTempPerfmonPath) {
-        Remove-Item $uncWinTempPerfmonPath -Force -Recurse -ErrorAction SilentlyContinue
-    }
+    $exsetupPath = Join-Path $(Get-ExchangeInstallPath -Server $Server) -ChildPath 'Bin\ExSetup.exe'
+    $exsetupPath = ConvertTo-UNCPath $exsetupPath -Server $Server
+    (Get-ItemProperty $exsetupPath).VersionInfo
 }
-
 
 <#
   Main
 #>
+
+if (-not $FromDateTime) {
+    $FromDateTime = [datetime]::MinValue
+}
+
+if (-not $ToDateTime) {
+    $ToDateTime = [datetime]::MaxValue
+}
+
+if ($FromDateTime -ge $ToDateTime) {
+    throw "Parameter ToDateTime ($ToDateTime) must be after FromDateTime ($FromDateTime)"
+}
 
 # If the path doesn't exist, create it.
 if (-not (Test-Path $Path -ErrorAction Stop)) {
@@ -1270,7 +1659,6 @@ if (-not $cmd) {
 $OrgConfig = Get-OrganizationConfig
 $OrgName = $orgConfig.Name
 $IsExchangeOnline = $orgConfig.LegacyExchangeDN.StartsWith('/o=ExchangeLabs')
-
 
 # Create a temporary folder to store data
 $tempFolder = New-Item $(Join-Path $Path -ChildPath $([Guid]::NewGuid().ToString())) -ItemType directory -ErrorAction Stop
@@ -1561,13 +1949,13 @@ Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
 Run Get-MigrationConfig
 Run Get-MigrationEndpoint
 Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity -SkipIfNoServers
-Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine -SkipIfNoServers
+# Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine -SkipIfNoServers # skipping, because gwmi Win32_Process is collected (see WMI section)
 Run Get-OutlookProtectionRule
 Run Get-PolicyTipConfig
 Run Get-RbacDiagnosticInfo
 Run Get-RoleAssignmentPolicy
 Run Get-SearchDocumentFormat
-Run Get-MailboxAuditBypassAssociation
+# Run Get-MailboxAuditBypassAssociation # skipping this because it takes time but rarely needed.
 Run Get-SettingOverride
 Run "Get-Mailbox -Arbitration" -PassThru | Save-Object -Name 'Mailbox-Arbitration'
 Run "Get-Mailbox -Monitoring" -PassThru | Save-Object -Name 'Mailbox-Monitoring'
@@ -1604,14 +1992,14 @@ Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -SkipIfN
 
 # WMI
 # Win32_powerplan is available in Win7 & above.
-Run 'Get-WmiObject -namespace root\cimv2\power -class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PowerPlan
+Run 'Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PowerPlan
 Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PageFileSetting
 Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_ComputerSystem
 Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_OperatingSystem
 Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru |
     Where-Object {$_.IPEnabled} | Save-Object -Name Win32_NetworkAdapterConfiguration
+Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
 
-#Run "Get-WmiObject Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
@@ -1630,11 +2018,9 @@ if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
 
     $eventLogPath = Join-Path $Path -ChildPath 'EventLogs'
     if ($IncludeEventLogsWithCrimson) {
-        # Get-ExchangeEventLog -Path:$eventLogPath -Servers:$directAccessServers -IncludeCrimsonLogs
         Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers
     }
     else {
-        # Get-ExchangeEventLog -Path:$eventLogPath -Servers:$directAccessServers
         Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers
     }
 }
@@ -1642,8 +2028,46 @@ if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
 # Collect Perfmon Log
 if ($IncludePerformanceLog) {
     Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
-    Run "Save-PerfmonLog -Path:$(Join-Path $Path 'Perfmon')" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+    Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 }
+
+# Collect IIS Log
+if ($IncludeIISLog) {
+    Write-Progress -Activity $collectionActivity -Status:"IIS Logs" -PercentComplete:90
+    Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+}
+
+# Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
+# With PowerShellv2, empty array is iterated.
+if ($IncludeExchangeLog.Count) {
+    foreach ($logType in $IncludeExchangeLog) {
+        Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
+        Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    }
+}
+
+# Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
+if ($IncludeTransportLog.Count) {
+    foreach ($logType in $IncludeTransportLog) {
+        Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
+        Run "Save-TransportLog -Path:`"$(Join-Path $Path $logType)`" -Type:'$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    }
+}
+
+# Collect Exchange Setup logs (Currently used. If there's any demand, activate it)
+if ($IncludeExchangeSetupLog) {
+    Write-Progress -Activity $collectionActivity -Status:"Exchange Setup Logs" -PercentComplete:90
+    Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers -SkipIfNoServers
+}
+
+# Collect Fast Search ULS logs
+if ($IncludeFastSearchLog) {
+    Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
+    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearch) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers 
+}
+
+# Get Exsetup version
+Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
 
 # Save errors
 if ($Script:errs.Count) {
