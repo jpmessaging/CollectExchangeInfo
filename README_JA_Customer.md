@@ -3,7 +3,7 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2019-12-25/Collect-ExchangeInfo.ps1)
+[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-02-18/Collect-ExchangeInfo.ps1)
 
 # 利用方法
 1. Collect-ExchangeInfo.ps1 をダウンロードし、ブロックを解除します。
