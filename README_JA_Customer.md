@@ -3,12 +3,12 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-02-18/Collect-ExchangeInfo.ps1)
+[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-02-20/Collect-ExchangeInfo.ps1)
 
 # 利用方法
 1. Collect-ExchangeInfo.ps1 をダウンロードし、ブロックを解除します。
 
-    [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-02-18/Collect-ExchangeInfo.ps1)
+    [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-02-20/Collect-ExchangeInfo.ps1)
 
    1. ファイルを右クリックして、プロパティを開きます  
    2. [全般] タブにて、「このファイルは他のコンピューターから取得したものです。このコンピューターを保護するため、このファイルへのアクセスはブロックされる可能性があります。」というメッセージが表示されている場合には、[許可する] にチェックを入れます。
