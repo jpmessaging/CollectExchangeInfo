@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-02-18"
+$version = "2020-02-20"
 #requires -Version 2.0
 
 <#
@@ -1787,7 +1787,7 @@ Run Get-AdminAuditLogConfig
 Run Get-AvailabilityAddressSpace
 Run Get-AvailabilityConfig
 Run Get-OrganizationRelationship
-Run Get-ADServerSettings
+Run "Get-ADServerSettings -WarningAction SilentlyContinue"
 Run Get-AuthConfig
 Run Get-AuthRedirect
 Run Get-AuthServer
@@ -2054,7 +2054,7 @@ if ($IncludeTransportLog.Count) {
     }
 }
 
-# Collect Exchange Setup logs (Currently used. If there's any demand, activate it)
+# Collect Exchange Setup logs (Currently not used. If there's any demand, activate it)
 if ($IncludeExchangeSetupLog) {
     Write-Progress -Activity $collectionActivity -Status:"Exchange Setup Logs" -PercentComplete:90
     Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers -SkipIfNoServers
