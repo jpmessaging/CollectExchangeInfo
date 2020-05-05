@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-02-20"
+$version = "2020-05-06"
 #requires -Version 2.0
 
 <#
@@ -257,7 +257,7 @@ function Compress-Folder {
     }
 
     # If there's no files, bail.
-    if ($files.Count -eq 0) {        
+    if ($files.Count -eq 0) {
         New-Object PSCustomObject -Property @{
             ZipFilePath = $null
             FilesRemoved = $false
@@ -269,6 +269,7 @@ function Compress-Folder {
         # Note: [System.IO.Compression.ZipFile]::CreateFromDirectory() fails when one or more files in the directory is locked.
         #[System.IO.Compression.ZipFile]::CreateFromDirectory($Path, $zipFilePath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
+        $zipStream = $zipArchive = $null
         try {
             New-Item $zipFilePath -ItemType file | Out-Null
 
@@ -279,6 +280,7 @@ function Compress-Folder {
             foreach ($file in $files) {
                 Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Adding $($file.FullName)" -PercentComplete (100 * $count / $files.Count)
 
+                $fileStream = $zipEntryStream = $null
                 try {
                     $fileStream = New-Object System.IO.FileStream -ArgumentList $file.FullName, ([IO.FileMode]::Open), ([IO.FileAccess]::Read), ([IO.FileShare]::ReadWrite)
                     $zipEntry = $zipArchive.CreateEntry($file.FullName.Substring($Path.Length + 1))
@@ -323,7 +325,7 @@ function Compress-Folder {
         $zipFile = $shellApp.NameSpace($zipFilePath)
 
         # Add the entire folder.
-        if ($null -eq $FromDateTime -and $null -eq $ToDateTime ) {            
+        if ($null -eq $FromDateTime -and $null -eq $ToDateTime ) {
             # Start copying the whole and wait until it's done. CopyHere works asynchronously.
             $zipFile.CopyHere($Path)
 
@@ -334,7 +336,7 @@ function Compress-Folder {
             [System.IO.FileStream]$file = $null
             while ($inProgress) {
                 Start-Sleep -Milliseconds $delayMilliseconds
-
+                $file = $null
                 try {
                     $file = [System.IO.File]::Open($zipFilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
                     $inProgress = $false
@@ -349,14 +351,14 @@ function Compress-Folder {
                 }
             }
         }
-        else {            
+        else {
             # Copy the files to a temporary folder (with folder hierarchy), and then zip it.
             $tempPath = Join-Path $(Get-WindowsTempFolder -Server $env:COMPUTERNAME) -ChildPath "$([Guid]::NewGuid().ToString())\$(Split-Path $Path -Leaf)"
-            New-Item $tempPath -ItemType directory -ErrorAction stop | Out-Null            
+            New-Item $tempPath -ItemType directory -ErrorAction stop | Out-Null
 
             try {
-                foreach ($fileInfo in $files) {      
-                    $tempDest = $tempPath             
+                foreach ($fileInfo in $files) {
+                    $tempDest = $tempPath
                     if ($fileInfo.DirectoryName.Length -gt $Path.Length) {
                         $folderName = $fileInfo.DirectoryName.Substring($Path.Length + 1)
                         $tempDest = Join-Path $tempDest -ChildPath $folderName
@@ -379,7 +381,6 @@ function Compress-Folder {
                 while ($inProgress) {
                     Start-Sleep -Milliseconds $delaymsec
                     $file = $null
-
                     try {
                         $file = [System.IO.File]::Open($zipFilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
                         $inProgress = $false
@@ -402,7 +403,7 @@ function Compress-Folder {
             }
             finally {
                 # Remove the temporary folder
-                if (Test-Path $tempPath) {                    
+                if (Test-Path $tempPath) {
                     Remove-Item (Get-Item $tempPath).Parent.FullName -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
@@ -650,8 +651,30 @@ function Save-ExchangeLogging {
         [DateTime]$ToDateTime
     )
 
-    $exchangePath  = Get-ExchangeInstallPath -Server $Server
-    $logPath = Join-Path $exchangePath "Logging\$FolderPath"
+    $logPath = $null
+
+    # Diagnostics path can be modified. So update the folder path if necessary
+    if ($FolderPath -like 'Diagnostics\*') {
+        $customPath = $null
+        try {
+            $customPath = Get-DiagnosticsPath -Server $Server -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Error "Get-DiagnosticsPath failed. $_."
+        }
+
+        if ($customPath) {
+            $subPath = $FolderPath.Substring($FolderPath.IndexOf('\') + 1)
+            $logPath = Join-Path $customPath -ChildPath $subPath
+            Write-Log "[$($MyInvocation.MyCommand)] Custom Diagnostics path is found. Using $logPath"
+        }
+    }
+
+    # Default path: %ExchangeInstallPath% + $FolderPath
+    if (-not $logPath) {
+        $exchangePath  = Get-ExchangeInstallPath -Server $Server
+        $logPath = Join-Path $exchangePath "Logging\$FolderPath"
+    }
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-path $Path -ChildPath $Server
@@ -698,13 +721,35 @@ function Save-TransportLog {
     }
 }
 
+function Get-DiagnosticsPath {
+    [CmdletBinding()]
+    param($Server)
+
+    $reg = $diagKey = $path = $null
+    try {
+        # Get the value of "HKEY_LOCAL_MACHINE\Software\Microsoft\ExchangeServer\v15\Diagnostics\LogFolderPath" if exits.
+        $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
+        $diagKey = $reg.OpenSubKey("Software\Microsoft\ExchangeServer\v15\Diagnostics\")
+        if (-not $diagKey) {
+            throw "OpenSubKey failed for 'Software\Microsoft\ExchangeServer\v15\Diagnostics\' on $Server"
+        }
+        $path = $diagKey.GetValue('LogFolderPath')
+    }
+    finally {
+        if ($diagKey) { $diagKey.Close() }
+        if ($reg) { $reg.Close() }
+    }
+
+    return $path
+}
+
 function Save-ExchangeSetupLog {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
         $Path,
         [Parameter(Mandatory=$true)]
-        $Server       
+        $Server
     )
 
     $source = ConvertTo-UNCPath 'C:\ExchangeSetupLogs' -Server $Server
@@ -723,7 +768,7 @@ function Save-FastSearchLog {
         [DateTime]$ToDateTime
     )
 
-    $exsetupPath = Get-ExchangeInstallPath -Server $Server     
+    $exsetupPath = Get-ExchangeInstallPath -Server $Server
     $source = ConvertTo-UNCPath $(Join-Path $exsetupPath 'Bin\Search\Ceres\Diagnostics\Logs') -Server $Server
     $destination = Join-path $Path -ChildPath $Server
     Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
@@ -763,7 +808,12 @@ function Invoke-Ldifde {
         throw "Ldifde is not available"
     }
 
-    $exorg = (Get-OrganizationConfig).DistinguishedName
+    if ($Script:OrgConfig) {
+        $exorg = $Script:OrgConfig.DistinguishedName
+    }
+    else {
+        $exorg = (Get-OrganizationConfig).DistinguishedName
+    }
 
     if (-not $exorg) {
         throw "Couldn't get Exchange org DN"
@@ -775,27 +825,30 @@ function Invoke-Ldifde {
         $Port = 50389
     }
 
+    $process = $null
+
     try {
         $fileNameWihtoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
         $stdOutput = Join-Path $resolvedPath -ChildPath "$fileNameWihtoutExtension.out"
 
         if ($Port) {
-    		    $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -s localhost -t $Port -f `"$filePath`"" -PassThru -NoNewWindow -RedirectStandardOutput:$stdOutput
+            $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -s localhost -t $Port -f `"$filePath`"" -WindowStyle:Hidden -RedirectStandardOutput:$stdOutput -Wait -PassThru
         }
         else {
-            $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -f `"$filePath`"" -PassThru -NoNewWindow -RedirectStandardOutput:$stdOutput
+            $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -f `"$filePath`"" -WindowStyle:Hidden -RedirectStandardOutput:$stdOutput -Wait -PassThru
         }
 
-        if (-not $process.HasExited) {
-            Wait-Process -InputObject $process
+        if ($process.ExitCode -ne 0) {
+            throw "ldifde failed. exit code = $($process.ExitCode)."
         }
-
-        $process = $null
     }
     finally {
         if ($process) {
-            Stop-Process -InputObject:$process -Force
-            throw "ldifde was cancelled"
+            if (-not $process.HasExited) {
+                Stop-Process -InputObject:$process -Force
+                Write-Error "ldifde was cancelled"
+            }
+            $process.Dispose()
         }
     }
 }
@@ -808,7 +861,8 @@ function RunCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$Command
+        [string]$Command,
+        [int]$TimeoutSeconds
     )
 
     $endOfCmdlet = $Command.IndexOf(" ")
@@ -819,77 +873,176 @@ function RunCommand {
         $cmdlet = $Command.Substring(0, $endOfCmdlet)
     }
 
-    # check if cmdlet is available
+    # Check if cmdlet is available
     $cmd = Get-Command $cmdlet -ErrorAction:SilentlyContinue
     if ($null -eq $cmd) {
         Write-Log "$cmdlet is not available"
         return
     }
 
-    # check params
-    # if any explicitly-requested params are not available, bail
-    $paramMatches = Select-String " -(?<paramName>\w+)" -Input $Command -AllMatches
-
-    if ($paramMatches) {
-        $params = @(
-            foreach($paramMatch in $paramMatches.Matches) {
-                $paramName = $paramMatch.Groups['paramName'].Value
-
-                # In order to support non-exact match, check each key
-                $keyMatch = @(
-                    foreach ($key in $cmd.Parameters.keys) {
-                        if ($key -like "$($paramName)*") {
-                            $key
-                        }
-                    }
-                )
-
-                # if there's no match or too many matches, bail.
-                if ($keyMatch.Count -eq 0) {
-                    Write-Log "Parameter '$paramName' is not available for $cmdlet"
-                    return
-                }
-                elseif ($keyMatch.Count -gt 1) {
-                    Write-Log "Parameter '$paramName' is ambiguous for $cmdlet"
-                    return
-                }
-
-                $keyMatch[0]
-            }
-        )
+    $ExchangeLocalPS = $false
+    $ExchangeRemotePS = $false
+    if ($cmd.CommandType -eq [System.Management.Automation.CommandTypes]::Cmdlet -and $cmd.ModuleName -eq 'Microsoft.Exchange.Management.PowerShell.E2010') {
+        $ExchangeLocalPS = $true
+    }
+    elseif ($cmd.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmd.Module -and $cmd.Module.ExportedFunctions.ContainsKey("Get-OrganizationConfig")) {
+        $ExchangeRemotePS = $true
     }
 
-    # check if any parameter is requested globally
-    # it's ok if these parameters are not available.
+    $ps = $null
+    if ($ExchangeLocalPS -or $ExchangeRemotePS) {
+        $ps = [PowerShell]::Create()
+    }
+
+    if ($ExchangeLocalPS) {
+        if (-not $Script:localRunspace) {
+            # For the first time, setup a runspace
+            $Script:localRunspace = [runspacefactory]::CreateRunspace()
+            $Script:localRunspace.Open()
+            $ps.Runspace = $Script:localRunspace
+            $ps.AddCommand('Add-PSSnapin').AddParameter('Name','Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
+            $ps.Invoke()
+            $ps.Commands.Clear()
+        }
+
+        $ps.Runspace = $Script:localRunspace
+    }
+    elseif ($ExchangeRemotePS) {
+        if (-not $Script:remoteRunspace) {
+            # For the first time, find or setup a runspace
+            $exSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq 'Available'}
+
+            if ($exSession) {
+                $Script:remoteRunspace = $exSession.Runspace
+            }
+            else {
+                # Maybe the session is broken. Try creating a new remote runspace with the same ConnectionInfo.
+                $oldSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange'} | Select-Object -First 1
+
+                if (-not $oldSession) {
+                    # This shouldn't happen because availability of Exchange's "Get-Organization" has been check earlier in the script. But just in case.
+                    throw "Cannot find the Exchange PSSession"
+                }
+
+                $Script:remoteRunspace = [runspacefactory]::CreateRunspace($oldSession.Runspace.ConnectionInfo)
+                $Script:remoteRunspace.Open()
+            }
+        }
+
+        $ps.Runspace = $Script:remoteRunspace
+    }
+
+    if ($ps) {
+        $psCommand = $ps.AddCommand($cmdlet, $true)
+    }
+
+    # Check parameters.
+    # If any explicitly-requested parameter is not available, ignore.
+    $paramMatches = Select-String "(\s-(?<paramName>\w+))((\s+|:)\s*(?<paramVal>[^-]\S+))?" -Input $Command -AllMatches
+
+    if ($paramMatches) {
+        $paramList = @(
+        foreach($paramMatch in $paramMatches.Matches) {
+            $paramName = $paramMatch.Groups['paramName'].Value
+            $paramValue = $paramMatch.Groups['paramVal'].Value
+
+            $params = @(
+            foreach ($param in $cmd.Parameters.GetEnumerator()) {
+                if ($param.Key -like "$paramName*") {
+                    $param
+                }
+            })
+
+            # If there's no match or too many matches, ignore.
+            if ($params.Count -eq 0) {
+                Write-Log "Parameter '$paramName' is not available for $cmdlet"
+                continue
+            }
+            elseif ($params.Count -gt 1) {
+                Write-Log "Parameter '$paramName' is ambiguous for $cmdlet"
+                continue
+            }
+
+            if ($ps -and $params[0].Value.SwitchParameter) {
+                $psCommand.AddParameter($params[0].Key) | Out-Null
+            }
+            elseif ($ps) {
+                $psCommand.AddParameter($params[0].Key, $paramValue) | Out-Null
+            }
+
+            Write-Output $params[0]
+        }
+        ) # end of $paramList array subexpression
+    }
+
+    # Check if any parameter is requested globally. Ignore the parameter if it's not available for this cmdlet.
     foreach ($param in $script:Parameters) {
         $paramName = ($param -split ":")[0]
-
+        $paramVal = ($param -split ":")[1]
         if ($cmd.Parameters[$paramName]) {
-            # explicitly-requested params take precedence
-            # if not already in the list, add it.
-            if ($params -notcontains $paramName) {
+            # Explicitly-requested parameters take precedence; If not already in the list, add it.
+            if ($paramList.Key -notcontains $paramName) {
                 $Command += " -$param"
+                if ($ps) {
+                    if ($paramVal) {
+                        $psCommand.AddParameter($paramName, $paramVal) | Out-Null
+                    }
+                    else {
+                        $psCommand.AddParameter($paramName) | Out-Null
+                    }
+
+                }
            }
         }
     }
 
     # Finally run the command
-    Write-Log "Running $Command"
-    try {
-        # capture non-terminating error
-        $err = $($o = Invoke-Expression $Command) 2>&1
-        if ($err) {
-            Write-Log "[Non-Terminating Error] Error in '$Command'. $err $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
-        }
+    Write-Log "Running $Command $(if ($ps -and $TimeoutSeconds){"with $TimeoutSeconds seconds timeout."})"
 
-        if ($null -ne $o) {
-            Write-Output $o
+    $timeoutmsec = -1
+    if ($TimeoutSeconds) {
+        $timeoutmsec = $TimeoutSeconds * 1000
+    }
+
+    $ar = $errs = $o = $null
+    try {
+        if ($ps) {
+            $ar = $ps.BeginInvoke()
+            if ($ar.AsyncWaitHandle.WaitOne($timeoutmsec)) {
+                # Event was signaled
+                $errs = $($o = $ps.EndInvoke($ar)) 2>&1
+            }
+            else {
+                Write-Log "[Timeout] '$Command' timed out after $TimeoutSeconds seconds"
+            }
+        }
+        else {
+            $errs = $($o = Invoke-Expression $Command) 2>&1
         }
     }
     catch {
         # log terminating error.
         Write-Log "[Terminating Error] '$Command' failed. $_ $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
-        if ($null -ne $Script:errs) {$errs.Add($_)}
+        if ($null -ne $Script:errs) {$Script.errs.Add($_)}
+    }
+    finally {
+        if ($errs.Count) {
+            foreach ($err in $errs) {
+                Write-Log "[Non-Terminating Error] Error in '$Command'. $err $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
+            }
+        }
+
+        if ($null -ne $o) {
+            Write-Output $o
+        }
+
+        if ($ar) {
+            $ar.AsyncWaitHandle.Close()
+        }
+
+        if ($ps) {
+            $ps.Dispose()
+        }
     }
 }
 
@@ -907,7 +1060,8 @@ function Run {
         [Parameter(ValueFromPipeline=$true)]
         [object[]]$ResultCollection,
         [switch]$RemoveDuplicate,
-        [switch]$PassThru
+        [switch]$PassThru,
+        [int]$TimeoutSeconds = 180
     )
 
     begin {
@@ -942,12 +1096,12 @@ function Run {
 
         $temp = @(
             if (-not $Servers.Count -and -not $SkipIfNoServers) {
-                RunCommand $Command
+                RunCommand $Command -TimeoutSeconds $TimeoutSeconds
             }
             elseif ($Servers) {
                 foreach ($Server in $Servers) {
                     $firstTimeAddingServerName = $true
-                    foreach ($entry in @(RunCommand "$Command -$Identifier $Server")) {
+                    foreach ($entry in @(RunCommand "$Command -$Identifier $Server" -TimeoutSeconds $TimeoutSeconds)) {
                         # Add ServerName prop if not exist already (but log only the first time per cmdlet)
                         if (!$entry.ServerName -and !$entry.Server -and !$entry.ServerFqdn -and !$entry.MailboxServer -and !$entry.Fqdn) {
                             if ($firstTimeAddingServerName) {
@@ -971,7 +1125,6 @@ function Run {
         else {
             # Check duplicates
             foreach ($o in $temp) {
-
                 if ($skipDupCheck) {
                     $result.Add($o)
                     continue
@@ -985,7 +1138,7 @@ function Run {
                     $dupCheckProp = 'Identity'
                 }
                 else {
-                    Write-Log "Cannot perform duplicate check because the results of '$($Command)' do not have Distinguishedname nor Identity."
+                    Write-Log "Cannot perform duplicate check because the results of '$($Command)' have neither Distinguishedname nor Identity."
                     $skipDupCheck = $true
                     $result.Add($o)
                     continue
@@ -994,7 +1147,7 @@ function Run {
                 $dups = @($result | Where-Object {$_.$dupCheckProp.ToString() -eq $o.$dupCheckProp.ToString()})
 
                 if ($dups.Count) {
-                    Write-Log "`"dropping a duplicate: '$($o.$dupCheckProp.ToString())'`""
+                    Write-Log "`"Dropping a duplicate: '$($o.$dupCheckProp.ToString())'`""
                 }
                 else {
                     $result.Add($o)
@@ -1015,8 +1168,8 @@ function Run {
 }
 
 <#
-  Write a log to a file and also Write-Verbose
-  This automatically creates a file and append
+  Write a log to a file.  This automatically creates a file and append to it.
+  Make sure to call Close-Log so that data in buffer is flushed and release the file handle.
 #>
 function Write-Log {
     [CmdletBinding()]
@@ -1029,18 +1182,26 @@ function Write-Log {
     $currentTime = Get-Date
     $currentTimeFormatted = $currentTime.ToString("yyyy/MM/dd HH:mm:ss.fffffff(K)")
 
-    [System.TimeSpan]$delta = 0;
+    if (-not $Script:logWriter) {
+        # For the first time, open file & add header
+        [IO.StreamWriter]$Script:logWriter = [IO.File]::AppendText($Path)
+        $Script:logWriter.WriteLine("date-time,delta(ms),info")
+    }
+
+    [TimeSpan]$delta = 0;
     if ($Script:lastLogTime) {
         $delta = $currentTime.Subtract($Script:lastLogTime)
     }
-    else {
-        # For the first time, add header
-        Add-Content $Path "date-time,delta(ms),info"
-    }
 
-    Write-Verbose $Text
-    Add-Content $Path "$currentTimeFormatted,$($delta.TotalMilliseconds),$text"
+    $Script:logWriter.WriteLine("$currentTimeFormatted,$($delta.TotalMilliseconds),$text")
     $Script:lastLogTime = $currentTime
+}
+
+function Close-Log {
+    if ($Script:logWriter) {
+        $Script:logWriter.Close()
+        $Script:logWriter = $null
+    }
 }
 
 <#
@@ -1051,6 +1212,7 @@ function Write-Log {
 function Get-VirtualDirectory {
     [CmdletBinding()]
     param()
+
     # List of Get-*VirtualDirectory commands.
     # CommantType can be different depending on whether Local PowerShell or Remote PowerShell
     $commands = @(Get-Command Get-*VirtualDirectory -ErrorAction:SilentlyContinue | Where-Object {$_.name -ne 'Get-WebVirtualDirectory' -and $_.name -ne 'Get-VirtualDirectory'})
@@ -1166,21 +1328,30 @@ function Get-SPN {
         throw "setspn.exe is not available"
     }
 
-    Add-Content -Path:$filePath -Value:"[setspn -P -F -Q http/*]"
-    $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q http/*' -Wait
-    $result.StdOut | Add-Content -Path:$filePath
+    $writer = $null
+    try {
+        $writer = [IO.File]::AppendText($filePath)
+        $writer.WriteLine("[setspn -P -F -Q http/*]")
+        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q http/*'
+        $writer.WriteLine($result.StdOut)
 
-    Add-Content -Path:$filePath -Value:"$([Environment]::NewLine)[setspn -P -F -Q exchangeMDB/*]"
-    $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeMDB/*' -Wait
-    $result.StdOut | Add-Content -Path:$filePath
+        $writer.WriteLine("[setspn -P -F -Q exchangeMDB/*]")
+        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeMDB/*'
+        $writer.WriteLine($result.StdOut)
 
-    Add-Content -Path:$filePath -Value:"$([Environment]::NewLine)[setspn -P -F -Q exchangeRFR/*]"
-    $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeRFR/*' -Wait
-    $result.StdOut | Add-Content -Path:$filePath
+        $writer.WriteLine("[setspn -P -F -Q exchangeRFR/*]")
+        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeRFR/*'
+        $writer.WriteLine($result.StdOut)
 
-    Add-Content -Path:$filePath -Value:"$([Environment]::NewLine)[setspn -P -F -Q exchangeAB/*]"
-    $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeAB/*' -Wait
-    $result.StdOut | Add-Content -Path:$filePath
+        $writer.WriteLine("[setspn -P -F -Q exchangeAB/*]")
+        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeAB/*'
+        $writer.WriteLine($result.StdOut)
+    }
+    finally {
+        if ($writer) {
+            $writer.Close()
+        }
+    }
 }
 
 function Invoke-ShellCommand {
@@ -1188,8 +1359,7 @@ function Invoke-ShellCommand {
     param(
         [Parameter(Mandatory = $True)]
         $FileName,
-        [string]$Argument,
-        [switch]$Wait
+        [string]$Argument
     )
 
     $startInfo = New-Object system.diagnostics.ProcessStartInfo
@@ -1200,22 +1370,56 @@ function Invoke-ShellCommand {
     $startInfo.Arguments = $Argument
     #$startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
     $startInfo.CreateNoWindow  = $true
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $startInfo
-    $process.Start() | Out-Null
 
-    if (-not $Wait) {
-        Write-Output $process
-    }
-    else {
-        # deadlock can occur b/w parent and child process!
+    $process = $job = $null
+
+    try {
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+
+        $stdErr = New-Object System.Text.StringBuilder
+        $job = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -MessageData $stdErr -Action {
+            $stdErr = $event.MessageData
+            $stdErr.Append($eventArgs.Data)
+        }
+
+        # stdOut can be read asynchronously, but there's no need. thus commented out.
+        # $stdOut = New-Object System.Text.StringBuilder
+
+        # $jobStdOut = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -MessageData $stdOut -Action {
+        #     $stdOut = $event.MessageData
+        #     $stdOut.Append($eventArgs.Data)
+        # }
+
+        $process.Start() | Out-Null
+
+        # Be careful here. Deadlock can occur b/w parent and child process!
         # https://msdn.microsoft.com/en-us/library/system.diagnostics.processstartinfo.redirectstandardoutput(v=vs.110).aspx
+        $processId = $process.Id
+        $process.BeginErrorReadLine()
 
-        $stdout = $process.StandardOutput.ReadToEnd()
+        #$process.BeginOutputReadLine()
+        $stdOut = $process.StandardOutput.ReadToEnd()
+
         $process.WaitForExit()
+        $exitCode = $process.ExitCode
 
-        $result = New-Object -TypeName PSCustomObject -Property @{Process = $process; StdOut = $stdout; ExitCode = $exitCode}
-        Write-Output $result
+        New-Object -TypeName PSCustomObject -Property @{PID = $processId; StdOut = $stdOut; StdErr = $stdErr.ToString(); ExitCode = $exitCode}
+
+    }
+    finally {
+        if ($job) {
+            Stop-Job $job
+            Remove-Job $job
+            $job.Dispose()
+        }
+
+        if ($process) {
+            if (-not $process.HasExited) {
+                Stop-Process -InputObject $process -Force
+            }
+            $process.Dispose()
+        }
     }
 }
 
@@ -1284,7 +1488,7 @@ function Save-ExchangeEventLog {
         $logs += (wevtutil el /r:$Server) -like 'Microsoft-Exchange*'
 
         # This is for the FAST Search.
-        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Office Server*' 
+        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Office Server*'
     }
 
     foreach ($log in $logs) {
@@ -1366,10 +1570,16 @@ function Get-DAG {
     param()
 
     $dags = RunCommand Get-DatabaseAvailabilityGroup
+
+    if (-not $dags.Count) {
+        return
+    }
+
     $result = @(
         foreach ($dag in $dags) {
             # Get-DatabaseAvailabilityGroup with "-Status" fails for cross Exchange versions (e.g. b/w E2010, E2013)
-            $dagWithStatus = RunCommand "Get-DatabaseAvailabilityGroup $dag -Status -ErrorAction:SilentlyContinue -WarningAction:SilentlyContinue"
+            # This could take a long time before it fails. Add a timeout.
+            $dagWithStatus = RunCommand "Get-DatabaseAvailabilityGroup $dag -Status -ErrorAction:SilentlyContinue -WarningAction:SilentlyContinue" -TimeoutSeconds 180
             if ($dagWithStatus) {
                 $dagWithStatus
             }
@@ -1394,54 +1604,97 @@ function Get-DotNetVersion {
 
     process {
         # Read NDP registry
+        $reg = $ndpKey = $null
         try {
             $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
-        }
-        catch {
-            $msg = $_.Exception.Message.Replace("`r`n", "")
-            throw "Couldn't open registry key of $Server. $msg"
-        }
-
-        $ndpKey = $reg.OpenSubKey("SOFTWARE\Microsoft\NET Framework Setup\NDP")
-        $result = @(
-            foreach ($versionKeyName in $ndpKey.GetSubKeyNames())  {
-                # ignore "CDF" etc
-                if ($versionKeyName -notlike "v*") {
-                    continue
-                }
-
-                $versionKey = $ndpKey.OpenSubKey($versionKeyName)
-                $version = $versionKey.GetValue("Version", "")
-                $sp = $versionKey.GetValue("SP", "")
-                $install = $versionKey.GetValue("Install", "")
-
-                if ($version) {
-                    New-Object PSCustomObject -Property @{Version = $version; SP = $sp; Install = $install; SubKey = $null; Release = $release; NET45Version = $null; ServerName = $Server}
-                    continue
-                }
-
-                # for v4 and V4.0, check sub keys
-                foreach ($subKeyName in $versionKey.GetSubKeyNames()) {
-
-                    $subKey = $versionKey.OpenSubKey($subKeyName)
-                    $version = $subKey.GetValue("Version", "")
-                    $install = $subKey.GetValue("Install", "")
-                    $release = $subKey.GetValue("Release", "")
-
-                    if ($release) {
-                        $NET45Version = Get-Net45Version $release
-                    }
-                    else {
-                        $NET45Version = $null
-                    }
-
-                    New-Object PSCustomObject -Property @{Version = $version; SP = $sp; Install = $install; SubKey = $subKeyName;Release = $release; NET45Version = $NET45Version; ServerName = $Server}
-                }
+            $ndpKey = $reg.OpenSubKey("SOFTWARE\Microsoft\NET Framework Setup\NDP")
+            if (-not $ndpKey) {
+                throw "OpenSubKey failed on 'SOFTWARE\Microsoft\NET Framework Setup\NDP'."
             }
-        )
 
-        $result = $result | Sort-Object -Property Version
-        Write-Output $result
+            $result = @(
+                foreach ($versionKeyName in $ndpKey.GetSubKeyNames())  {
+                    $versionKey = $null
+                    try {
+                        # ignore "CDF" etc
+                        if ($versionKeyName -notlike "v*") {
+                            continue
+                        }
+
+                        $versionKey = $ndpKey.OpenSubKey($versionKeyName)
+                        if (-not $versionKey) {
+                            Write-Error "OpenSubKey failed on $versionKeyName. Skipping."
+                            continue
+                        }
+
+                        $version = $versionKey.GetValue("Version", "")
+                        $sp = $versionKey.GetValue("SP", "")
+                        $install = $versionKey.GetValue("Install", "")
+
+                        if ($version) {
+                            New-Object PSCustomObject -Property @{
+                                Version = $version
+                                SP = $sp
+                                Install = $install
+                                SubKey = $null
+                                Release = $release
+                                NET45Version = $null
+                                ServerName = $Server
+                            }
+
+                            continue
+                        }
+
+                        # for v4 and V4.0, check sub keys
+                        foreach ($subKeyName in $versionKey.GetSubKeyNames()) {
+                            $subKey = $null
+                            try {
+                                $subKey = $versionKey.OpenSubKey($subKeyName)
+                                if (-not $subKey) {
+                                    Write-Error "OpenSubKey failed on $subKeyName. Skipping."
+                                    continue
+                                }
+
+                                $version = $subKey.GetValue("Version", "")
+                                $install = $subKey.GetValue("Install", "")
+                                $release = $subKey.GetValue("Release", "")
+
+                                if ($release) {
+                                    $NET45Version = Get-Net45Version $release
+                                }
+                                else {
+                                    $NET45Version = $null
+                                }
+
+                                New-Object PSCustomObject -Property @{
+                                    Version = $version
+                                    SP = $sp
+                                    Install = $install
+                                    SubKey = $subKeyName
+                                    Release = $release
+                                    NET45Version = $NET45Version
+                                    ServerName = $Server
+                                }
+                            }
+                            finally {
+                                if ($subKey) {$subKey.Close()}
+                            }
+                        }
+                    }
+                    finally {
+                        if ($versionKey) {$versionKey.Close()}
+                    }
+                }
+            )
+
+            $result = $result | Sort-Object -Property Version
+            Write-Output $result
+        }
+        finally {
+            if ($ndpKey) { $ndpKey.Close() }
+            if ($reg) { $reg.Close() }
+        }
+
     } # end of process{}
 
     end {}
@@ -1479,74 +1732,116 @@ function Get-TlsRegistry {
     Begin{}
 
     Process {
-        try {
-            $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
-        }
-        catch {
-            Write-Error "Couldn't open registry key of $Server.`n$_"
-            return
-        }
-
-        $result = New-Object System.Collections.Generic.List[object]
+    $reg = $protocols = $null
+    try {
+        $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
 
         # OS SChannel related
         $protocols = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\')
-        # "Protocols" key should exist
-        foreach ($protocolKeyName in $protocols.GetSubKeyNames()) {
-            # subKeyName is "SSL 2.0", "TLS 1.0", etc
-            $protocolKey = $protocols.OpenSubKey($protocolKeyName)
-            #$subkeyNames = @('Client','Server')
-            foreach ($subKeyName in $protocolKey.GetSubKeyNames()) {
-                $subKey = $protocolKey.OpenSubKey($subKeyName)
 
-                $disabledByDefault = $subKey.GetValue('DisabledByDefault', '')
-                $enabled = $subKey.GetValue('Enabled', '')
+        # Note: OpenSubKey returns $null if the operation failed.
+        if ($protocols) {
+            foreach ($protocolKeyName in $protocols.GetSubKeyNames()) {
+                $protocolKey = $null
+                try {
+                    # subKeyName is "SSL 2.0", "TLS 1.0", etc
+                    $protocolKey = $protocols.OpenSubKey($protocolKeyName)
+                    if (-not $protocolKey) {
+                        Write-Error "OpenSubKey failed for $protocolKeyName on $Server. Skipping."
+                        continue
+                    }
 
-                $result.Add((New-Object PSCustomObject -Property @{ServerName = $Server
-                    Name = "SChannel $protocolKeyName $subKeyName"
-                    DisabledByDefault = $disabledByDefault
-                    Enabled = $enabled
-                    RegistryKey = $subKey.Name
-                    })
-                )
+                    foreach ($subKeyName in $protocolKey.GetSubKeyNames()) {
+                        $subKey = $null
+                        try {
+                            $subKey = $protocolKey.OpenSubKey($subKeyName)
+                            if (-not $subKey) {
+                                Write-Error "OpenSubKey failed for $subKeyName on $Server. Skipping."
+                                continue
+                            }
+
+                            $disabledByDefault = $subKey.GetValue('DisabledByDefault', '')
+                            $enabled = $subKey.GetValue('Enabled', '')
+
+                            New-Object PSCustomObject -Property @{
+                                ServerName = $Server
+                                Name = "SChannel $protocolKeyName $subKeyName"
+                                DisabledByDefault = $disabledByDefault
+                                Enabled = $enabled
+                                RegistryKey = $subKey.Name
+                            }
+                        }
+                        finally {
+                            if ($subKey) {$subKey.Close()}
+                        }
+                    }
+                }
+                finally {
+                    if ($protocolKey) {$protocolKey.Close()}
+                }
             }
+        }
+        else {
+            # If OpenSubKey failed, write to error stream and flow through.
+            Write-Error "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\' on $Server"
         }
 
         # .NET related
         $netKeyNames = @('SOFTWARE\Microsoft\.NETFramework\', 'SOFTWARE\Wow6432Node\Microsoft\.NETFramework\')
-
         foreach ($netKeyName in $netKeyNames) {
-            $netKey = $reg.OpenSubKey($netKeyName)
-            $netSubKeyNames = @('v2.0.50727','v4.0.30319')
-
-            foreach ($subKeyName in $netSubKeyNames) {
-                $subKey = $netKey.OpenSubKey($subKeyName)
-                if (-not $subKey) {
+            $netKey = $null
+            try {
+                $netKey = $reg.OpenSubKey($netKeyName)
+                if (-not $netKey) {
+                    Write-Error "OpenSubKey failed on $netKeyName on $Server. Skipping."
                     continue
                 }
 
-                $systemDefaultTlsVersions = $subKey.GetValue('SystemDefaultTlsVersions','')
-                $schUseStrongCrypto = $subKey.GetValue('SchUseStrongCrypto','')
+                $netSubKeyNames = @('v2.0.50727','v4.0.30319')
 
-                if ($subKey.Name.IndexOf('Wow6432Node', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    $name = ".NET Framework $subKeyName (Wow6432Node)"
-                }
-                else {
-                    $name = ".NET Framework $subKeyName"
-                }
+                foreach ($subKeyName in $netSubKeyNames) {
+                    $subKey = $null
+                    try {
+                        $subKey = $netKey.OpenSubKey($subKeyName)
+                        if (-not $subKey) {
+                            Write-Error "OpenSubKey failed for $subKeyName on $Server. Skipping."
+                            continue
+                        }
 
-                $result.Add((New-Object PSCustomObject -Property @{ServerName = $Server
-                    Name = $name
-                    SystemDefaultTlsVersions = $systemDefaultTlsVersions
-                    SchUseStrongCrypto = $schUseStrongCrypto
-                    RegistryKey = $subKey.Name
-                    })
-                )
+                        $systemDefaultTlsVersions = $subKey.GetValue('SystemDefaultTlsVersions','')
+                        $schUseStrongCrypto = $subKey.GetValue('SchUseStrongCrypto','')
+
+                        if ($subKey.Name.IndexOf('Wow6432Node', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            $name = ".NET Framework $subKeyName (Wow6432Node)"
+                        }
+                        else {
+                            $name = ".NET Framework $subKeyName"
+                        }
+
+                        New-Object PSCustomObject -Property @{
+                            ServerName = $Server
+                            Name = $name
+                            SystemDefaultTlsVersions = $systemDefaultTlsVersions
+                            SchUseStrongCrypto = $schUseStrongCrypto
+                            RegistryKey = $subKey.Name
+                        }
+                    }
+                    finally {
+                        if ($subKey) {$subKey.Close()}
+                    }
+                }
+            }
+            finally {
+                if ($netKey) { $netKey.Close() }
             }
         }
-
-        $result
     }
+    finally {
+        if ($protocols) { $protocols.Close() }
+        if ($reg) { $reg.Close() }
+    }
+
+    } # End of process{}
 
     End{}
 }
@@ -1555,27 +1850,62 @@ function Get-TCPIP6Registry {
     [CmdletBinding()]
     param(
         [parameter(ValueFromPipeline=$true)]
-        [string]$Server= $env:COMPUTERNAME
+        [string]$Server = $env:COMPUTERNAME
     )
 
     begin{}
 
     process {
+        $reg = $key = $null
         try {
             $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
-        }
-        catch {
-            Write-Error "Couldn't open registry key of $Server.`n$_"
-            return
-        }
+            $key = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\')
+            if (-not $key) {
+                throw "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\' on $Server"
+            }
 
-        $key = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\')
-        $disabledComponents = $key.GetValue('DisabledComponents','')
-
-        New-Object PSCustomObject -Propert @{DisabledComponents = $disabledComponents}
+            $disabledComponents = $key.GetValue('DisabledComponents','')
+            New-Object PSCustomObject -Property @{
+                ServerName = $Server;
+                DisabledComponents = $disabledComponents
+            }
+        }
+        finally {
+            if ($key) { $key.Close() }
+            if ($reg) { $reg.Close() }
+        }
     }
 
     end{}
+}
+
+function Get-SmbConfig {
+    [CmdletBinding()]
+    param (
+        [parameter(Mandatory = $true)]
+        $Server
+    )
+
+    $reg = $key = $null
+    try {
+        # Could use "Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" but it'd require a remote ps session, which might not be availble for E2010/W2k8R2.
+        # Thus using the registry API directly.
+        $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
+        $key = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\')
+        if (-not $key) {
+            throw "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\' on $Server"
+        }
+
+        $smb1 = $key.GetValue('SMB1','')
+        New-Object PSCustomObject -Property @{
+            ServerName = $Server
+            SMB1 = $smb1
+        }
+    }
+    finally {
+        if ($key) { $key.Close() }
+        if ($reg) { $reg.Close() }
+    }
 }
 
 function Get-IISWebBinding {
@@ -1667,8 +1997,9 @@ $tempFolder = New-Item $(Join-Path $Path -ChildPath $([Guid]::NewGuid().ToString
 # NOTE: until $logPath is defined, don't call Write-Log
 $logFileName = "Log.txt"
 $logPath = Join-Path -Path $tempFolder.FullName -ChildPath $logFileName
+#$lastLogTime = $null
 
-$lastLogTime = $null
+$startDateTime = Get-Date
 Write-Log "Organization Name = $OrgName"
 Write-Log "Script Version = $version"
 Write-Log "COMPUTERNAME = $env:COMPUTERNAME"
@@ -1697,35 +2028,30 @@ if ($Servers -and -not (Get-Command Get-ExchangeServer -ErrorAction SilentlyCont
 # Prepare the list of Exchange Servers to directly access by parsing the values specified in "Servers" parameter
 # Used in VDir, Mailbox Catabase Copy, Certificate etc.
 # First, get the candidates from the user specified values in $Servers
-$directAccessCandidates =@(
-    foreach ($server in $Servers) {
-        # $Server's value might be something like "e2013*" and matches multiple Servers
-        $exServers = @(Get-ExchangeServer $server -ErrorAction SilentlyContinue)
+$directAccessCandidates = New-Object System.Collections.Generic.List[object]
+foreach ($server in $Servers) {
+    # $Server's value might be something like "e2013*" and matches multiple Servers
+    $exServers = @(Get-ExchangeServer $server -ErrorAction SilentlyContinue)
 
-        if (-not $exServers.Count) {
-            Write-Log "Get-ExchangeServer did not find any Server matching '$Server'"
+    if (-not $exServers.Count) {
+        Write-Log "Get-ExchangeServer did not find any Server matching '$server'"
+        continue
+    }
+
+    foreach ($exServer in $exServers) {
+        # Skip Edge servers unless it's the local server.
+        if ($exServer.IsEdgeServer -and $env:COMPUTERNAME -ne $exServer.Name) {
+            Write-Log "Dropping $($exServer.Name) from directAccessCandidates since it's an Edge server"
+            continue
         }
 
-        foreach ($exServer in $exServers) {
-            # In PowerShellv2. $exServer may be $null.
-            if (-not $exServer) {
-                continue
-            }
-
-            # Skip Edge servers unless it's the local server.
-            if ($exServer.IsEdgeServer -and $env:COMPUTERNAME -ne $exServer.Name) {
-                Write-Log "Dropping $($exServer.Name) from directAccessCandidates since it's an Edge server"
-                continue
-            }
-
-            # add if it's not a duplicate
-            $inDAS = @($directAccessCandidates | Where-Object {$_.Name -eq $exServer.Name}).Count -gt 0
-            if (-not $inDAS) {
-                $exServer
-            }
+        # Add if it's not a duplicate
+        $inDAS = @($directAccessCandidates | Where-Object {$_.Name -eq $exServer.Name}).Count -gt 0
+        if (-not $inDAS) {
+            $directAccessCandidates.Add($exServer)
         }
     }
-)
+}
 
 Write-Log "directAccessCandidates = $directAccessCandidates"
 
@@ -1782,7 +2108,7 @@ $collectionActivity = "Collecting Data"
 Write-Progress -Activity:$collectionActivity -Status:"Org Settings" -PercentComplete:0
 
 # When you don't specify 'Path' for Save-Object, it's saved to $Script:Path
-Run Get-OrganizationConfig
+$OrgConfig | Save-Object -Name "OrganizationConfig"
 Run Get-AdminAuditLogConfig
 Run Get-AvailabilityAddressSpace
 Run Get-AvailabilityConfig
@@ -1901,7 +2227,7 @@ Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Obj
     Run "Get-PublicFolderDatabase" -RemoveDuplicate
 
 Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer}) -SkipIfNoServers
-Get-DAG
+Run Get-DAG
 Run Get-DatabaseAvailabilityGroupConfiguration
 if (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction:SilentlyContinue) {
     Run "Get-DatabaseAvailabilityGroupNetwork -ErrorAction:SilentlyContinue" -Servers:(Get-DatabaseAvailabilityGroup) -Identifier:'Identity'
@@ -1942,7 +2268,7 @@ Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.Is
 # Throttling
 Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
 Run Get-ThrottlingPolicy
-Run Get-ThrottlingPolicyAssociation
+Run 'Get-ThrottlingPolicyAssociation -ResultSize 1000'
 
 # misc
 Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
@@ -1954,6 +2280,11 @@ Run Get-OutlookProtectionRule
 Run Get-PolicyTipConfig
 Run Get-RbacDiagnosticInfo
 Run Get-RoleAssignmentPolicy
+# RBAC roles & assignments are skippped for now (can be included in future if necessary)
+# Run Get-ManagementRole
+# Run Get-ManagementRoleAssignment
+# Run Get-ManagementScope
+
 Run Get-SearchDocumentFormat
 # Run Get-MailboxAuditBypassAssociation # skipping this because it takes time but rarely needed.
 Run Get-SettingOverride
@@ -2000,6 +2331,10 @@ Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAcc
     Where-Object {$_.IPEnabled} | Save-Object -Name Win32_NetworkAdapterConfiguration
 Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
 
+# Get Exsetup version
+Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
+
+Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
@@ -2018,10 +2353,10 @@ if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
 
     $eventLogPath = Join-Path $Path -ChildPath 'EventLogs'
     if ($IncludeEventLogsWithCrimson) {
-        Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers
+        Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers -SkipIfNoServers
     }
     else {
-        Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers
+        Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers -SkipIfNoServers
     }
 }
 
@@ -2063,11 +2398,8 @@ if ($IncludeExchangeSetupLog) {
 # Collect Fast Search ULS logs
 if ($IncludeFastSearchLog) {
     Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
-    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearch) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers 
+    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearch) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
-
-# Get Exsetup version
-Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
 
 # Save errors
 if ($Script:errs.Count) {
@@ -2075,7 +2407,7 @@ if ($Script:errs.Count) {
     if (-not (Test-Path errPath)) {
         New-Item $errPath -ItemType Directory -ErrorAction Stop | Out-Null
     }
-    $errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
+    $Script.errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
 }
 
 } # end of try for transcript
@@ -2084,10 +2416,12 @@ finally {
     if ($transcriptEnabled) {
         Stop-Transcript
     }
+
+    Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
+    Close-Log
 }
 
 Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
-Write-Log "Running Compress-Folder -Path:$Path -ZipFileName:$OrgName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath"
 Compress-Folder -Path:$Path -ZipFileName:$OrgName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath -IncludeDateTime | Out-Null
 
 if (-not $KeepOutputFiles){
@@ -2101,4 +2435,4 @@ else {
 }
 
 Write-Progress -Activity $collectionActivity -Status "Done" -Completed
-Write-Output "Done!"
+Write-Host "Done!" -ForegroundColor Green
