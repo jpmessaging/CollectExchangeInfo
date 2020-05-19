@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-05-06"
+$version = "2020-05-20"
 #requires -Version 2.0
 
 <#
@@ -909,18 +909,19 @@ function RunCommand {
     }
     elseif ($ExchangeRemotePS) {
         if (-not $Script:remoteRunspace) {
-            # For the first time, find or setup a runspace
-            $exSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq 'Available'}
+            # For the first time, find or setup a runspace.
+            # For online case, there could be more than one session of 'Microsoft.Exchange'; Exchange & SCC. Make sure to exclude SCC session.
+            $exSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq 'Available' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1
 
             if ($exSession) {
                 $Script:remoteRunspace = $exSession.Runspace
             }
             else {
                 # Maybe the session is broken. Try creating a new remote runspace with the same ConnectionInfo.
-                $oldSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange'} | Select-Object -First 1
+                $oldSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1
 
                 if (-not $oldSession) {
-                    # This shouldn't happen because availability of Exchange's "Get-Organization" has been check earlier in the script. But just in case.
+                    # This shouldn't happen because availability of Exchange's "Get-Organization" has been checked earlier in the script. But just in case.
                     throw "Cannot find the Exchange PSSession"
                 }
 
