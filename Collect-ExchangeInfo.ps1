@@ -1181,7 +1181,7 @@ function Write-Log {
     )
 
     $currentTime = Get-Date
-    $currentTimeFormatted = $currentTime.ToString("yyyy/MM/dd HH:mm:ss.fffffff(K)")
+    $currentTimeFormatted = $currentTime.ToString('o')
 
     if (-not $Script:logWriter) {
         # For the first time, open file & add header
@@ -1977,12 +1977,6 @@ if ($FromDateTime -ge $ToDateTime) {
     throw "Parameter ToDateTime ($ToDateTime) must be after FromDateTime ($FromDateTime)"
 }
 
-# If the path doesn't exist, create it.
-if (-not (Test-Path $Path -ErrorAction Stop)) {
-    New-Item -ItemType directory $Path -ErrorAction Stop | Out-Null
-}
-$Path = Resolve-Path $Path
-
 $cmd = Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue
 if (-not $cmd) {
     throw "Get-OrganizationConfig is not available. Please run with Exchange Remote PowerShell session"
@@ -1991,6 +1985,12 @@ $OrgConfig = Get-OrganizationConfig
 $OrgName = $orgConfig.Name
 $IsExchangeOnline = $orgConfig.LegacyExchangeDN.StartsWith('/o=ExchangeLabs')
 
+# If the path doesn't exist, create it.
+if (-not (Test-Path $Path -ErrorAction Stop)) {
+    New-Item -ItemType directory $Path -ErrorAction Stop | Out-Null
+}
+$Path = Resolve-Path $Path
+
 # Create a temporary folder to store data
 $tempFolder = New-Item $(Join-Path $Path -ChildPath $([Guid]::NewGuid().ToString())) -ItemType directory -ErrorAction Stop
 
@@ -1998,7 +1998,6 @@ $tempFolder = New-Item $(Join-Path $Path -ChildPath $([Guid]::NewGuid().ToString
 # NOTE: until $logPath is defined, don't call Write-Log
 $logFileName = "Log.txt"
 $logPath = Join-Path -Path $tempFolder.FullName -ChildPath $logFileName
-#$lastLogTime = $null
 
 $startDateTime = Get-Date
 Write-Log "Organization Name = $OrgName"
@@ -2011,7 +2010,12 @@ $sb = New-Object System.Text.StringBuilder
 foreach ($paramName in $PSBoundParameters.Keys) {
     $var = Get-Variable $paramName -ErrorAction SilentlyContinue
     if ($var) {
-        $sb.Append("$($var.Name):$($var.Value); ") | Out-Null
+        if ($var.Value -is [DateTime]) {
+            $sb.Append("$($var.Name):$($var.Value.ToUniversalTime().ToString('o')); ") | Out-Null
+        }
+        else {
+            $sb.Append("$($var.Name):$($var.Value); ") | Out-Null
+        }
     }
 }
 Write-Log $sb.ToString()
