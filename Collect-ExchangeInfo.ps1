@@ -120,7 +120,7 @@ param (
     [switch]$IncludePerformanceLog,
     [switch]$IncludeIISLog,
     [string[]]$IncludeExchangeLog,
-    [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable')]
+    [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
     [string[]]$IncludeTransportLog,
     [switch]$IncludeFastSearchLog,
     [Nullable[DateTime]]$FromDateTime,
@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-05-20"
+$version = "2020-06-05"
 #requires -Version 2.0
 
 <#
@@ -689,7 +689,7 @@ function Save-TransportLog {
         [Parameter(Mandatory=$true)]
         $Server,
         [Parameter(Mandatory=$true)]
-        [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable')]
+        [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
         $Type,
         [DateTime]$FromDateTime,
         [DateTime]$ToDateTime
