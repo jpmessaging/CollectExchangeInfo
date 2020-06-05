@@ -820,16 +820,17 @@ function Invoke-Ldifde {
     }
 
     # If this is an Edge server, use a port 50389.
-    $server = Get-ExchangeServer $env:COMPUTERNAME
+    $port = 0
+    $server = Get-ExchangeServer $env:COMPUTERNAME -ErrorAction SilentlyContinue
     if ($server -and $server.IsEdgeServer) {
-        $Port = 50389
+        $port = 50389
     }
 
     $fileNameWihtoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
     $stdOutput = Join-Path $resolvedPath -ChildPath "$fileNameWihtoutExtension.out"
 
-    if ($Port) {
-        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -s localhost -t $Port -f `"$filePath`""
+    if ($port) {
+        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -s localhost -t $port -f `"$filePath`""
     }
     else {
         $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -f `"$filePath`""
