@@ -1007,7 +1007,7 @@ function RunCommand {
             }
         }
         else {
-            $errs = $($o = Invoke-Expression $Command) 2>&1
+            $errs = @($($o = Invoke-Expression $Command) 2>&1)
         }
     }
     catch {
