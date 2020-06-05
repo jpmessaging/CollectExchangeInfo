@@ -825,31 +825,20 @@ function Invoke-Ldifde {
         $Port = 50389
     }
 
-    $process = $null
+    $fileNameWihtoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    $stdOutput = Join-Path $resolvedPath -ChildPath "$fileNameWihtoutExtension.out"
 
-    try {
-        $fileNameWihtoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
-        $stdOutput = Join-Path $resolvedPath -ChildPath "$fileNameWihtoutExtension.out"
-
-        if ($Port) {
-            $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -s localhost -t $Port -f `"$filePath`"" -WindowStyle:Hidden -RedirectStandardOutput:$stdOutput -Wait -PassThru
-        }
-        else {
-            $process = Start-Process ldifde -ArgumentList "-u -d `"$exorg`" -f `"$filePath`"" -WindowStyle:Hidden -RedirectStandardOutput:$stdOutput -Wait -PassThru
-        }
-
-        if ($process.ExitCode -ne 0) {
-            throw "ldifde failed. exit code = $($process.ExitCode)."
-        }
+    if ($Port) {
+        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -s localhost -t $Port -f `"$filePath`""
     }
-    finally {
-        if ($process) {
-            if (-not $process.HasExited) {
-                Stop-Process -InputObject:$process -Force
-                Write-Error "ldifde was cancelled"
-            }
-            $process.Dispose()
-        }
+    else {
+        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -f `"$filePath`""
+    }
+
+    $result.StdOut | Out-File $stdOutput -Encoding utf8
+
+    if ($result.ExitCode -ne 0) {
+        throw "ldifde failed. exit code = $($result.ExitCode)."
     }
 }
 
