@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-06-05"
+$version = "2020-06-20"
 #requires -Version 2.0
 
 <#
@@ -1001,7 +1001,7 @@ function RunCommand {
             $ar = $ps.BeginInvoke()
             if ($ar.AsyncWaitHandle.WaitOne($timeoutmsec)) {
                 # Event was signaled
-                $errs = $($o = $ps.EndInvoke($ar)) 2>&1
+                $errs = @($($o = $ps.EndInvoke($ar)) 2>&1)
             }
             else {
                 Write-Log "[Timeout] '$Command' timed out after $TimeoutSeconds seconds"
@@ -1027,12 +1027,13 @@ function RunCommand {
             Write-Output $o
         }
 
-        if ($ar) {
-            $ar.AsyncWaitHandle.Close()
-        }
-
         if ($ps) {
             $ps.Dispose()
+            if ($ar) {
+                # Make sure to close the handle only after ps is disposed. If cmdlet is still running (because of timeout), closing the handle could crash powershell.exe
+                # Note: $ps.Dispose does not close the AsyncWaitHandle.
+                $ar.AsyncWaitHandle.Close()
+            }
         }
     }
 }
