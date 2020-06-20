@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-06-20"
+$version = "2020-06-24"
 #requires -Version 2.0
 
 <#
@@ -844,6 +844,142 @@ function Invoke-Ldifde {
 }
 
 <#
+Get an available runspace. If available runspace is not found, it creates a new one (local or remote runspace)
+#>
+function Get-Runspace {
+    [CmdletBinding()]
+    param()
+
+    # For the first time, create a runspace pool
+    if ($null -eq $Script:RunspacePool) {
+        $Script:RunspacePool = New-Object System.Collections.Generic.List[System.Management.Automation.Runspaces.Runspace]
+    }
+
+    # For the first time, determine local or remote runspace
+    if (-not $Script:ExchangeLocalPS -and -not $Script:ExchangeRemotePS) {
+        $command = Get-Command "Get-OrganizationConfig"
+
+        if ($Command.CommandType -eq [System.Management.Automation.CommandTypes]::Cmdlet -and $Command.ModuleName -eq 'Microsoft.Exchange.Management.PowerShell.E2010') {
+            $Script:ExchangeLocalPS = $true
+        }
+        elseif ($Command.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $Command.Module) {
+            $Script:ExchangeRemotePS = $true
+
+            # Remember the primary runspace so that its ConnectionInfo can be used when creating a new remote runspace.
+            $Script:PrimaryRunspace = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available -and  $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1 -ExpandProperty Runspace
+            if (-not $Script:PrimaryRunspace) {
+                # If "Available" runspace is not there, then select whichever
+                $Script:PrimaryRunspace = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1 -ExpandProperty Runspace
+            }
+
+            $Script:RunspacePool.Add($Script:PrimaryRunspace)
+        }
+    }
+
+    # Find an available runspace
+    $rs = $Script:RunspacePool | Where-Object {$_.RunspaceAvailability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available} | Select-Object -First 1
+    if ($rs) {
+        return $rs
+    }
+
+    # If there's no available runspace, create one.
+    if ($Script:ExchangeLocalPS) {
+        $rs = [RunspaceFactory]::CreateRunspace()
+        $rs.Open()
+
+        # Add Exchange Local PowerShell so that it's ready to be used.
+        $ps = [PowerShell]::Create()
+        $ps.Runspace = $rs
+        $ps.AddCommand('Add-PSSnapin').AddParameter('Name','Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
+        $ps.Invoke() | Out-Null
+        $ps.Dispose()
+    }
+    elseif ($Script:ExchangeRemotePS) {
+        $rs = [RunspaceFactory]::CreateRunspace($Script:PrimaryRunspace.ConnectionInfo)
+        $rs.Open()
+    }
+
+    Write-Log "$(if ($rs.ConnectionInfo) {'Remote'} else {'Local'}) runspace was created. Runspace count: $($Script:RunspacePool.Count + 1)"
+    $Script:RunspacePool.Add($rs)
+    Write-Output $rs
+}
+
+function Remove-Runspace {
+    [CmdletBinding()]
+    param()
+
+    $count = 0
+    foreach ($rs in $Script:RunspacePool) {
+        if ($rs -ne $Script:PrimaryRunspace) {
+            $rs.Dispose()
+            ++$count
+        }
+    }
+
+    Write-Log "$count runspaces were removed"
+}
+
+<#
+Helper function to create an AsyncCallback instance which invokes the given scriptblock callback.
+Basically same as:
+https://web.archive.org/web/20190222052659/http://www.nivot.org/blog/post/2009/10/09/PowerShell20AsynchronousCallbacksFromNET
+#>
+function New-AsyncCallback {
+    param (
+        [parameter(Mandatory=$true)]
+        [scriptblock]$Callback
+    )
+
+    # Class that exposes an event of type AsyncCallback that Register-ObjectEvent can register to.
+    $AsyncCallbackProxyType = @"
+        using System;
+        using System.Threading;
+
+        public sealed class AsyncCallbackProxy
+        {
+            // This is the exposed event. The sole purpose is for Register-ObjectEvent to hook to.
+            public event AsyncCallback AsyncOpComplete;
+
+            // Private ctor
+            private AsyncCallbackProxy() { }
+
+            // Raise the event
+            private void OnAsyncOpComplete(IAsyncResult ar)
+            {
+                // For .NET 2.0, System.Threading.Volatile.Read is not available.
+                //AsyncCallback temp = System.Threading.Volatile.Read(ref AsyncOpComplete);                
+                AsyncCallback temp = AsyncOpComplete;
+                if (temp != null) {
+                    temp(ar);
+                }
+            }
+
+            // This is the AsyncCallback instance.
+            public AsyncCallback Callback
+            {
+                get { return new AsyncCallback(OnAsyncOpComplete); }
+            }
+
+            public static AsyncCallbackProxy Create()
+            {
+                return new AsyncCallbackProxy();
+            }
+        }
+"@
+
+    if (-not ("AsyncCallbackProxy" -as [type])) {
+        Add-Type $AsyncCallbackProxyType
+    }
+
+    $proxy = [AsyncCallbackProxy]::Create()
+    Register-ObjectEvent -InputObject $proxy -EventName AsyncOpComplete -Action $Callback -Messagedata $args | Out-Null
+
+    # When an async operation finishes, this AsyncCallback instance gets invoked, which in turn raises AsynOpCompleted event of the proxy object.
+    # Since this AsynOpCompleted is registered by Register-ObjectEvent, it calls the script block.
+    $proxy.Callback
+}
+
+<#
   Run a given command only if it's available
   Run with parameters specified as Global Parameter (i.e. $script:Parameters)
 #>
@@ -879,48 +1015,10 @@ function RunCommand {
         $ExchangeRemotePS = $true
     }
 
-    $ps = $null
+    [System.Management.Automation.PowerShell]$ps = $null
     if ($ExchangeLocalPS -or $ExchangeRemotePS) {
         $ps = [PowerShell]::Create()
-    }
-
-    if ($ExchangeLocalPS) {
-        if (-not $Script:localRunspace) {
-            # For the first time, setup a runspace
-            $Script:localRunspace = [runspacefactory]::CreateRunspace()
-            $Script:localRunspace.Open()
-            $ps.Runspace = $Script:localRunspace
-            $ps.AddCommand('Add-PSSnapin').AddParameter('Name','Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
-            $ps.Invoke()
-            $ps.Commands.Clear()
-        }
-
-        $ps.Runspace = $Script:localRunspace
-    }
-    elseif ($ExchangeRemotePS) {
-        if (-not $Script:remoteRunspace) {
-            # For the first time, find or setup a runspace.
-            # For online case, there could be more than one session of 'Microsoft.Exchange'; Exchange & SCC. Make sure to exclude SCC session.
-            $exSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq 'Available' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1
-
-            if ($exSession) {
-                $Script:remoteRunspace = $exSession.Runspace
-            }
-            else {
-                # Maybe the session is broken. Try creating a new remote runspace with the same ConnectionInfo.
-                $oldSession = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1
-
-                if (-not $oldSession) {
-                    # This shouldn't happen because availability of Exchange's "Get-Organization" has been checked earlier in the script. But just in case.
-                    throw "Cannot find the Exchange PSSession"
-                }
-
-                $Script:remoteRunspace = [runspacefactory]::CreateRunspace($oldSession.Runspace.ConnectionInfo)
-                $Script:remoteRunspace.Open()
-            }
-        }
-
-        $ps.Runspace = $Script:remoteRunspace
+        $ps.Runspace = Get-Runspace
     }
 
     if ($ps) {
@@ -1000,8 +1098,8 @@ function RunCommand {
         if ($ps) {
             $ar = $ps.BeginInvoke()
             if ($ar.AsyncWaitHandle.WaitOne($timeoutmsec)) {
-                # Event was signaled
-                $errs = @($($o = $ps.EndInvoke($ar)) 2>&1)
+                $o = $ps.EndInvoke($ar)
+                $errs = @($ps.Streams.Error)
             }
             else {
                 Write-Log "[Timeout] '$Command' timed out after $TimeoutSeconds seconds"
@@ -1012,14 +1110,14 @@ function RunCommand {
         }
     }
     catch {
-        # log terminating error.
-        Write-Log "[Terminating Error] '$Command' failed. $_ $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
+        # Log the terminating error.
+        Write-Log "[Terminating Error] '$Command' failed. $($_.ToString().Replace([Environment]::NewLine,' ')) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
         if ($null -ne $Script:errs) {$Script.errs.Add($_)}
     }
     finally {
         if ($errs.Count) {
             foreach ($err in $errs) {
-                Write-Log "[Non-Terminating Error] Error in '$Command'. $err $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
+                Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString().Replace([Environment]::NewLine,' ')) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
             }
         }
 
@@ -1028,10 +1126,27 @@ function RunCommand {
         }
 
         if ($ps) {
-            $ps.Dispose()
-            if ($ar) {
-                # Make sure to close the handle only after ps is disposed. If cmdlet is still running (because of timeout), closing the handle could crash powershell.exe
-                # Note: $ps.Dispose does not close the AsyncWaitHandle.
+            if ($ps.InvocationStateInfo.State -eq "Running") {
+                # Asychronously stop the command and dispose the powershell instance.
+                $context = New-Object PSCustomObject -Property @{
+                    PowerShell = $ps
+                    AsyncResult = $ar
+                }
+
+                $ps.BeginStop(
+                    (
+                        New-AsyncCallback {
+                            param ([IAsyncResult]$asyncResult)
+                            $state = $asyncResult.AsyncState
+                            $state.PowerShell.Dispose()
+                            $state.AsyncResult.AsyncWaitHandle.Close()
+                        }
+                    ),
+                    $context
+                ) | Out-Null
+            }
+            else {
+                $ps.Dispose()
                 $ar.AsyncWaitHandle.Close()
             }
         }
@@ -1110,6 +1225,28 @@ function Run {
                 }
             }
         )
+
+        # Deserialize if SerializationData property is available.
+        if (-not $Script:formatter) {
+            $Script:formatter = New-Object System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+        }
+
+        for ($i = 0; $i -lt $temp.Count; ++$i) {
+            if ($null -ne $temp[$i].serializationData) {
+                try {
+                    $stream = New-Object system.io.memoryStream -ArgumentList (, $temp[$i].serializationData)
+                    $temp[$i] = $Script:formatter.Deserialize($stream)
+                }
+                catch {
+                    Write-Log "Deserialize failed. $($_.ToString())"
+                }
+                finally {
+                    if ($stream) {
+                        $stream.Dispose()
+                    }
+                }
+            }
+        }
 
         if (-not $RemoveDuplicate) {
             $result.AddRange($temp)
@@ -2413,6 +2550,7 @@ finally {
         Stop-Transcript
     }
 
+    Remove-Runspace
     Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
     Close-Log
 }
