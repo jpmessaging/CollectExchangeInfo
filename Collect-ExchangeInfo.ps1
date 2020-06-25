@@ -1111,13 +1111,13 @@ function RunCommand {
     }
     catch {
         # Log the terminating error.
-        Write-Log "[Terminating Error] '$Command' failed. $($_.ToString().Replace([Environment]::NewLine,' ')) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
+        Write-Log "[Terminating Error] '$Command' failed. $($_.ToString()) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
         if ($null -ne $Script:errs) {$Script.errs.Add($_)}
     }
     finally {
         if ($errs.Count) {
             foreach ($err in $errs) {
-                Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString().Replace([Environment]::NewLine,' ')) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
+                Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString()) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
             }
         }
 
@@ -1238,7 +1238,7 @@ function Run {
                     $temp[$i] = $Script:formatter.Deserialize($stream)
                 }
                 catch {
-                    Write-Log "Deserialize failed. $($_.ToString())"
+                    Write-Log "Deserialization failed. $($_.ToString())"
                 }
                 finally {
                     if ($stream) {
@@ -1276,7 +1276,7 @@ function Run {
                 $dups = @($result | Where-Object {$_.$dupCheckProp.ToString() -eq $o.$dupCheckProp.ToString()})
 
                 if ($dups.Count) {
-                    Write-Log "`"Dropping a duplicate: '$($o.$dupCheckProp.ToString())'`""
+                    Write-Log "Dropping a duplicate: '$($o.$dupCheckProp.ToString())'"
                 }
                 else {
                     $result.Add($o)
@@ -1322,7 +1322,15 @@ function Write-Log {
         $delta = $currentTime.Subtract($Script:lastLogTime)
     }
 
-    $Script:logWriter.WriteLine("$currentTimeFormatted,$($delta.TotalMilliseconds),$text")
+    # Format as CSV:
+    $sb = New-Object System.Text.StringBuilder
+    $sb.Append($currentTimeFormatted).Append(',') | Out-Null
+    $sb.Append($delta.TotalMilliseconds).Append(',') | Out-Null
+    $sb.Append('"').Append($Text.Replace('"', "'")).Append('"') | Out-Null
+
+    $Script:logWriter.WriteLine($sb.ToString())
+
+    $sb = $null
     $Script:lastLogTime = $currentTime
 }
 
