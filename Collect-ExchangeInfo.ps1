@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-06-24"
+$version = "2020-07-01"
 #requires -Version 2.0
 
 <#
@@ -947,7 +947,7 @@ function New-AsyncCallback {
             private void OnAsyncOpComplete(IAsyncResult ar)
             {
                 // For .NET 2.0, System.Threading.Volatile.Read is not available.
-                //AsyncCallback temp = System.Threading.Volatile.Read(ref AsyncOpComplete);                
+                //AsyncCallback temp = System.Threading.Volatile.Read(ref AsyncOpComplete);
                 AsyncCallback temp = AsyncOpComplete;
                 if (temp != null) {
                     temp(ar);
@@ -1379,56 +1379,68 @@ function Get-VirtualDirectory {
     }
 }
 
-function Invoke-FIPSCmdlet {
+function Invoke-FIPS {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        [string[]]$Servers,
-        [Parameter(Mandatory = $true)]
-        [string]$FIPSCmdlet
+    [string[]]$Servers
     )
 
-    $result = @(
-        foreach($server in $Servers) {
+    if (-not $Servers.Count) {
+        return
+    }
+
+    # key: Cmdlet Name, value: List of cmdlet output
+    $resultSet = @{}
+
+    foreach ($server in $Servers) {
+        $session = $null
+        $FIPSCmdlets = $null
+        try {
+            # First, setup a session/runspace; load PSSnapin and obtain FIPS-related cmdlets
             $command = "Add-PSSnapin -Name Microsoft.Forefront.Filtering.Management.PowerShell;"
-            $command += "$FIPSCmdlet;"
+            $command += "Get-Command -Module Microsoft.Forefront.Filtering.Management.PowerShell"
             $scriptblock = $ExecutionContext.InvokeCommand.NewScriptBlock($command)
 
-            Write-Log "[$($MyInvocation.MyCommand)] Running $FIPSCmdlet on $server"
-            Invoke-Command -ServerName $server -ScriptBlock $scriptblock -ErrorAction SilentlyContinue
+            $session = New-PSSession -ComputerName $server
+            $FIPSCmdlets = @(Invoke-Command -Session $session -ScriptBlock $scriptblock -ErrorAction SilentlyContinue `
+                | Where-Object {$_.Name -like "Get-*" -and $_.Name -ne "Get-ConfigurationValue"})
+
+            foreach ($cmdlet in $FIPSCmdlets){
+                $scriptblock = $ExecutionContext.InvokeCommand.NewScriptBlock($cmdlet)
+                Write-Log "Running $cmdlet on $server"
+
+                try {
+                    $errs = @($($o = Invoke-Command -Session $session -ScriptBlock $scriptblock) 2>&1)
+
+                    if ($errs.Count) {
+                        foreach ($err in $errs) {
+                            Write-Log "[Non-Terminiating Error]$err"
+                        }
+                    }
+
+                    $cmdletName = $cmdlet.ToString().Substring(4)
+                    if ($null -eq $resultSet[$cmdletName]) {
+                        $resultSet[$cmdletName] = New-Object System.Collections.Generic.List[object]
+                    }
+
+                    $resultSet[$cmdletName].Add($o)
+                }
+                catch {
+                    Write-Log "[Terminating Error] $_"
+                }
+            }
         }
-    )
-    $commandName = $FIPSCmdlet.Substring(4)
-    $result | Save-Object -Name $commandName
-}
-
-function Invoke-FIPSCommand {
-    [CmdletBinding()]
-    param(
-        [string[]]$Servers
-    )
-
-    process {
-        # If no Server is given, bail.
-        # In PowerShell v2, $null.Count is $null. In V5, $null.Count is 0. Thus, In V2, $null.Count -eq 0 is false, while it's true in v5.
-        # To check emptiness, use just $something.Count. If empty, either $null (v2) or 0 (v5), thus it's evaluated to be false in both v2 & v5
-        if (-not $Servers.Count) {
-            Write-Error ("[$($MyInvocation.MyCommand)] Servers is null or empty")
-            return
+        catch {
+            Write-Log "[Terminating Error] Failed to setup PSSession. $_"
         }
-
-        $command = "Add-PSSnapin -Name Microsoft.Forefront.Filtering.Management.PowerShell;"
-        $command += "Get-Command -Module Microsoft.Forefront.Filtering.Management.PowerShell"
-        $scriptblock = $ExecutionContext.InvokeCommand.NewScriptBlock($command)
-
-        # ASSUME all servers have the same FIPS cmdlets
-        $FIPSCmdlets = Invoke-Command -ServerName:$Servers[0] -ScriptBlock $scriptblock -ErrorAction SilentlyContinue
-        # filter only Get-* cmdlets except Get-ConfigurationValue
-        $FIPSCmdlets = $FIPSCmdlets | Where-Object {$_.Name -like "Get-*" -and $_.Name -ne "Get-ConfigurationValue" }
-
-        foreach ($cmdlet in $FIPSCmdlets) {
-            Invoke-FIPSCmdlet -Servers:$Servers -FIPSCmdlet:$cmdlet
+        finally {
+            $session | Remove-PSSession -ErrorAction SilentlyContinue
         }
+    }
+
+    # Save results
+    foreach ($result in $resultSet.GetEnumerator()) {
+        $result.Value | Save-Object -Name $result.Key
     }
 }
 
@@ -2440,7 +2452,7 @@ Run Get-MalwareFilterPolicy
 Run Get-MalwareFilterRule
 if ($IncludeFIPS) {
     Write-Progress -Activity $collectionActivity -Status:"FIPS" -PercentComplete:85
-    Run Invoke-FIPSCommand -Servers ($directAccessServers | Where-Object {$_.IsE15OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
+    Invoke-FIPS -Servers ($directAccessServers | Where-Object {$_.IsE15OrLater -and $_.IsHubTransportServer})
 }
 
 Run Get-HostedConnectionFilterPolicy
