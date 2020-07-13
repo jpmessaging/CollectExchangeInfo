@@ -1,13 +1,13 @@
-# 概要
+## 概要
 Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成情報を取得し、指定したパスにログ ファイルを出力します。設定変更などは実施しません。
 
 詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
 
-# 利用方法
+## 利用方法
 1. Collect-ExchangeInfo.ps1 をダウンロードし、ブロックを解除します。
 
-    [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-06-20/Collect-ExchangeInfo.ps1)
+    [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-07-01/Collect-ExchangeInfo.ps1)
 
    1. ファイルを右クリックして、プロパティを開きます  
    2. [全般] タブにて、「このファイルは他のコンピューターから取得したものです。このコンピューターを保護するため、このファイルへのアクセスはブロックされる可能性があります。」というメッセージが表示されている場合には、[許可する] にチェックを入れます。
@@ -35,7 +35,7 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 スクリプトが終了すると、"<組織名_採取日時>.zip" が出力されます。こちらの ZIP ファイルを弊社までお寄せください。
 
 
-# 実行例
+## 実行例
 1.  Active Directory 上の構成情報のみを取得します。
 
     ```PowerShell
@@ -48,7 +48,7 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
     .\Collect-ExchangeInfo.ps1 -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
     ```
 
-# ライセンス
+## ライセンス
 Copyright (c) 2020 Ryusuke Fujita
 
 This software is released under the MIT License.  

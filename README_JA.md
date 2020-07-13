@@ -1,4 +1,4 @@
-# 概要
+## 概要
 Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成情報を取得し、指定したパスにログ ファイルを出力します。設定変更などは実施しません。
 
 本スクリプトは Active Directory 上の構成情報、そして Servers パラメーターで指定したサーバー上の情報を取得するものであるため、各サーバーで実施いただく必要はありません。任意のサーバー (※) で一度のみ実施ください。
@@ -7,11 +7,11 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 より詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-06-20/Collect-ExchangeInfo.ps1)
+[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2020-07-01/Collect-ExchangeInfo.ps1)
 
 Load-Clixml.ps1 は `Load-CliXml` コマンドレットのみ含むファイルです。`Load-CliXml` はフォルダ内の XML ファイルをまとめて `Import-CliXml` にて取り込み、グローバル スコープに対応する変数を作成します。例えば、"ExchangeServer.xml" に対して変数 `$ExchangeServer` を作成します。Load-Clixml.ps1 は Collect-ExchangeInfo.ps1 で取得したデータを取り込むために作成したものであり、Collect-ExchangeInfo.ps1 の実行に必要なものではありません。
 
-# 実行例
+## 実行例
 1.  Active Directory 上の構成情報のみを取得します。
 
     ```PowerShell
@@ -24,12 +24,12 @@ Load-Clixml.ps1 は `Load-CliXml` コマンドレットのみ含むファイル�
     .\Collect-ExchangeInfo.ps1 -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
     ```
 
-# 補足
+## 補足
 ps1 ファイルをダウンロード後、以下の手順でブロックを解除します。
 1. ファイルを右クリックして、プロパティを開きます
 2. [全般] タブにて、「このファイルは他のコンピューターから取得したものです。このコンピューターを保護するため、このファイルへのアクセスはブロックされる可能性があります。」というメッセージが表示されている場合には、[許可する] にチェックを入れます。
 
-# ライセンス
+## ライセンス
 Copyright (c) 2020 Ryusuke Fujita
 
 This software is released under the MIT License.  
