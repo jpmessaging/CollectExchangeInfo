@@ -2270,6 +2270,7 @@ Run "Get-ADServerSettings -WarningAction SilentlyContinue"
 Run Get-AuthConfig
 Run Get-AuthRedirect
 Run Get-AuthServer
+Run Get-PartnerApplication
 Run Get-DomainController
 Run Get-IRMConfiguration
 Run Get-OfflineAddressBook
