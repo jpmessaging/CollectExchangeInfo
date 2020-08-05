@@ -635,6 +635,27 @@ function Save-IISLog {
     }
 }
 
+function Save-HttpErr {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Path,
+        [Parameter(Mandatory = $true)]
+        $Server,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    # The path of HTTPERR log can be changed by:
+    # HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\HTTP\Parameters\ErrorLoggingDir
+    # But this should be rare. So just assume all servers use the default path.
+    $logPath = Join-Path $env:SystemRoot 'System32\LogFiles\HTTPERR'
+
+    $source = ConvertTo-UNCPath $logPath -Server $Server
+    $destination = Join-Path $Path -ChildPath $Server
+    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+}
+
 <#
 Save folder under %ExchangeInstallPath%Logging
 #>
@@ -2535,6 +2556,7 @@ if ($IncludePerformanceLog) {
 if ($IncludeIISLog) {
     Write-Progress -Activity $collectionActivity -Status:"IIS Logs" -PercentComplete:90
     Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
 
 # Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
