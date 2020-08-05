@@ -2306,7 +2306,7 @@ Run Get-PartnerApplication
 Run Get-DomainController
 Run Get-IRMConfiguration
 Run Get-OfflineAddressBook
-Run Get-OrganizationalUnit
+# Run Get-OrganizationalUnit
 Run Get-OutlookProvider
 Run Get-OwaMailboxPolicy
 Run Get-ResourceConfig
@@ -2430,9 +2430,10 @@ Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -Perc
 Run Get-GlobalMonitoringOverride
 Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
-Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
-Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
-Run Test-ServiceHealth -Servers:$directAccessServers -SkipIfNoServers
+# Heath-related command are now commented out since rarely needed.
+# Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+# Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+# Run Test-ServiceHealth -Servers:$directAccessServers -SkipIfNoServers
 
 # Federation & Hybrid
 Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:75
@@ -2454,7 +2455,7 @@ Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.Is
 # Throttling
 Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
 Run Get-ThrottlingPolicy
-Run 'Get-ThrottlingPolicyAssociation -ResultSize 1000'
+# Run 'Get-ThrottlingPolicyAssociation -ResultSize 1000'
 
 # misc
 Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
