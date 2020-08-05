@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-07-01"
+$version = "2020-08-06"
 #requires -Version 2.0
 
 <#
@@ -696,16 +696,21 @@ function Save-TransportLog {
     )
 
     $transport = $null
-    if (Get-Command 'Get-TransportService' $Server -ErrorAction SilentlyContinue) {
+    if (Get-Command 'Get-TransportService' -ErrorAction SilentlyContinue) {
         $transport = Get-TransportService $Server
     }
-    elseif (Get-Command 'Get-TransportServer' $Server -ErrorAction SilentlyContinue) {
+    elseif (Get-Command 'Get-TransportServer' -ErrorAction SilentlyContinue) {
         $transport = Get-TransportServer $Server
     }
 
     # If both Get-TransportService & Get-TransportServer are not available, bail.
     if (-not $transport) {
         throw "Get-TransportService/TransportServer is not available."
+    }
+
+    $frontendTransport = $null
+    if (Get-Command 'Get-FrontendTransportService' -ErrorAction SilentlyContinue) {
+        $frontendTransport = Get-FrontendTransportService $Server
     }
 
     foreach ($logType in $Type) {
@@ -716,8 +721,14 @@ function Save-TransportLog {
             continue
         }
         $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
-        $destination = Join-path $Path -ChildPath $Server
+        $destination = Join-path $Path -ChildPath "$Server\Hub"
         Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+
+        if ($frontendTransport -and $frontendTransport.$paramName) {
+            $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
+            $destination = Join-path $Path -ChildPath "$Server\FrontEnd"
+            Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+        }
     }
 }
 
