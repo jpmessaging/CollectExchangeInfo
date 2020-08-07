@@ -2380,9 +2380,8 @@ Run Get-RetentionPolicy
 Run Get-RetentionPolicyTag
 Write-Log "AD AddressBook Retention Done"
 
-# WMI
+# Server Settings
 Write-Progress -Activity $collectionActivity -Status:"Server Settings" -PercentComplete:40
-
 Run Get-ExchangeServer
 Run Get-MailboxServer
 
