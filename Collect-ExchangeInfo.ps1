@@ -2395,7 +2395,7 @@ Run Get-RpcClientAccess
 Run "Get-TransportServer -WarningAction:SilentlyContinue"
 Run Get-TransportService
 Run Get-FrontendTransportService
-Run Get-ExchangeDiagnosticInfo
+Run Get-ExchangeDiagnosticInfo -Servers $directAccessServers
 Run Get-ExchangeServerAccessLicense
 
 Run Get-PopSettings -Servers:$allExchangeServers
