@@ -143,7 +143,7 @@ function Save-Object {
         $Name,
         [string]$Path = $Script:Path,
         [bool]$WithCliXml = $true,
-        $Depth = 5 # depth for Export-CliXml
+        $Depth = 4 # depth for Export-CliXml
     )
 
     begin {
