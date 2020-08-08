@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-08-06"
+$version = "2020-08-08"
 #requires -Version 2.0
 
 <#
@@ -544,13 +544,13 @@ function Save-Item {
         $files = @(Get-ChildItem $SourcePath -Recurse | Where-Object {-not $_.PSIsContainer})
 
         if ($FromDateTime)  {
-            $files = $files | Where-Object {$_.LastWriteTime -ge $FromDateTime}
+            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
         }
 
         if ($ToDateTime) {
-            $files = $files | Where-Object {$_.LastWriteTime -le $ToDateTime}
+            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
         }
-
+        
         foreach ($file in $files) {
             $destination = Join-Path $DestitionPath $file.Directory.Name
             if (-not (Test-Path $destination)) {
@@ -558,7 +558,7 @@ function Save-Item {
             }
             Copy-Item $file.FullName -Destination $destination -Force
         }
-
+        
         if ($files.Count -eq 0) {
             Write-Log "[$($MyInvocation.MyCommand)] There're no files in $SourcePath from $FromDateTime to $ToDateTime"
         }
@@ -672,7 +672,9 @@ function Save-ExchangeLogging {
         [DateTime]$ToDateTime
     )
 
-    $logPath = $null
+    # Default path: %ExchangeInstallPath% + $FolderPath    
+    $exchangePath  = Get-ExchangeInstallPath -Server $Server
+    $logPath = Join-Path $exchangePath "Logging\$FolderPath"
 
     # Diagnostics path can be modified. So update the folder path if necessary
     if ($FolderPath -like 'Diagnostics\*') {
@@ -689,12 +691,6 @@ function Save-ExchangeLogging {
             $logPath = Join-Path $customPath -ChildPath $subPath
             Write-Log "[$($MyInvocation.MyCommand)] Custom Diagnostics path is found. Using $logPath"
         }
-    }
-
-    # Default path: %ExchangeInstallPath% + $FolderPath
-    if (-not $logPath) {
-        $exchangePath  = Get-ExchangeInstallPath -Server $Server
-        $logPath = Join-Path $exchangePath "Logging\$FolderPath"
     }
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
@@ -718,10 +714,10 @@ function Save-TransportLog {
 
     $transport = $null
     if (Get-Command 'Get-TransportService' -ErrorAction SilentlyContinue) {
-        $transport = Get-TransportService $Server
+        $transport = Get-TransportService $Server -ErrorAction SilentlyContinue
     }
     elseif (Get-Command 'Get-TransportServer' -ErrorAction SilentlyContinue) {
-        $transport = Get-TransportServer $Server
+        $transport = Get-TransportServer $Server -ErrorAction SilentlyContinue
     }
 
     # If both Get-TransportService & Get-TransportServer are not available, bail.
@@ -731,7 +727,7 @@ function Save-TransportLog {
 
     $frontendTransport = $null
     if (Get-Command 'Get-FrontendTransportService' -ErrorAction SilentlyContinue) {
-        $frontendTransport = Get-FrontendTransportService $Server
+        $frontendTransport = Get-FrontendTransportService $Server -ErrorAction SilentlyContinue
     }
 
     foreach ($logType in $Type) {
@@ -742,12 +738,12 @@ function Save-TransportLog {
             continue
         }
         $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
-        $destination = Join-path $Path -ChildPath "$Server\Hub"
+        $destination = Join-Path $Path -ChildPath "$logType\$Server\Hub"
         Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 
         if ($frontendTransport -and $frontendTransport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
-            $destination = Join-path $Path -ChildPath "$Server\FrontEnd"
+            $destination = Join-Path $Path -ChildPath "$logType\$Server\FrontEnd"
             Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
@@ -2537,7 +2533,7 @@ else {
 if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
     Write-Progress -Activity $collectionActivity -Status:"Event Logs" -PercentComplete:90
 
-    $eventLogPath = Join-Path $Path -ChildPath 'EventLogs'
+    $eventLogPath = Join-Path $Path -ChildPath 'EventLog'
     if ($IncludeEventLogsWithCrimson) {
         Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers -SkipIfNoServers
     }
@@ -2554,7 +2550,7 @@ if ($IncludePerformanceLog) {
 
 # Collect IIS Log
 if ($IncludeIISLog) {
-    Write-Progress -Activity $collectionActivity -Status:"IIS Logs" -PercentComplete:90
+    Write-Progress -Activity $collectionActivity -Status:"IIS Log" -PercentComplete:90
     Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
     Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
@@ -2570,10 +2566,8 @@ if ($IncludeExchangeLog.Count) {
 
 # Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
 if ($IncludeTransportLog.Count) {
-    foreach ($logType in $IncludeTransportLog) {
-        Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
-        Run "Save-TransportLog -Path:`"$(Join-Path $Path $logType)`" -Type:'$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
-    }
+    Write-Progress -Activity $collectionActivity -Status:"Transport Logs" -PercentComplete:90
+    Run "Save-TransportLog -Path:`"$(Join-Path $Path 'TransportLog')`" -Type:$($IncludeTransportLog -join ',') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
 
 # Collect Exchange Setup logs (Currently not used. If there's any demand, activate it)
@@ -2585,7 +2579,7 @@ if ($IncludeExchangeSetupLog) {
 # Collect Fast Search ULS logs
 if ($IncludeFastSearchLog) {
     Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
-    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearch) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearchLog) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
 
 # Save errors
