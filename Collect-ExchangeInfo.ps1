@@ -249,11 +249,11 @@ function Compress-Folder {
 
     # Apply filters
     if ($FromDateTime)  {
-        $files = $files | Where-Object {$_.LastWriteTime -ge $FromDateTime}
+        $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
     }
 
     if ($ToDateTime) {
-        $files = $files | Where-Object {$_.LastWriteTime -le $ToDateTime}
+        $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
     }
 
     # If there's no files, bail.
@@ -325,7 +325,7 @@ function Compress-Folder {
         $zipFile = $shellApp.NameSpace($zipFilePath)
 
         # Add the entire folder.
-        if ($null -eq $FromDateTime -and $null -eq $ToDateTime ) {
+        if ($null -eq $FromDateTime -and $null -eq $ToDateTime) {
             # Start copying the whole and wait until it's done. CopyHere works asynchronously.
             $zipFile.CopyHere($Path)
 
@@ -550,7 +550,7 @@ function Save-Item {
         if ($ToDateTime) {
             $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
         }
-        
+
         foreach ($file in $files) {
             $destination = Join-Path $DestitionPath $file.Directory.Name
             if (-not (Test-Path $destination)) {
@@ -558,7 +558,7 @@ function Save-Item {
             }
             Copy-Item $file.FullName -Destination $destination -Force
         }
-        
+
         if ($files.Count -eq 0) {
             Write-Log "[$($MyInvocation.MyCommand)] There're no files in $SourcePath from $FromDateTime to $ToDateTime"
         }
@@ -672,7 +672,7 @@ function Save-ExchangeLogging {
         [DateTime]$ToDateTime
     )
 
-    # Default path: %ExchangeInstallPath% + $FolderPath    
+    # Default path: %ExchangeInstallPath% + $FolderPath
     $exchangePath  = Get-ExchangeInstallPath -Server $Server
     $logPath = Join-Path $exchangePath "Logging\$FolderPath"
 
@@ -1439,11 +1439,8 @@ function Invoke-FIPS {
 
                 try {
                     $errs = @($($o = Invoke-Command -Session $session -ScriptBlock $scriptblock) 2>&1)
-
-                    if ($errs.Count) {
-                        foreach ($err in $errs) {
-                            Write-Log "[Non-Terminiating Error]$err"
-                        }
+                    foreach ($err in $errs) {
+                        Write-Log "[Non-Terminiating Error]$err"
                     }
 
                     $cmdletName = $cmdlet.ToString().Substring(4)
@@ -1746,7 +1743,7 @@ function Get-DAG {
     [CmdletBinding()]
     param()
 
-    $dags = RunCommand Get-DatabaseAvailabilityGroup
+    $dags = @(RunCommand Get-DatabaseAvailabilityGroup)
 
     if (-not $dags.Count) {
         return
@@ -1791,6 +1788,8 @@ function Get-DotNetVersion {
 
             $result = @(
                 foreach ($versionKeyName in $ndpKey.GetSubKeyNames())  {
+                    if ($null -eq $versionKeyName) {continue}
+
                     $versionKey = $null
                     try {
                         # ignore "CDF" etc
@@ -1824,6 +1823,8 @@ function Get-DotNetVersion {
 
                         # for v4 and V4.0, check sub keys
                         foreach ($subKeyName in $versionKey.GetSubKeyNames()) {
+                            if ($null -eq $subKeyName) {continue}
+
                             $subKey = $null
                             try {
                                 $subKey = $versionKey.OpenSubKey($subKeyName)
@@ -1929,6 +1930,8 @@ function Get-TlsRegistry {
                     }
 
                     foreach ($subKeyName in $protocolKey.GetSubKeyNames()) {
+                        if ($null -eq $subKeyName) { continue }
+
                         $subKey = $null
                         try {
                             $subKey = $protocolKey.OpenSubKey($subKeyName)
@@ -2142,11 +2145,11 @@ function Get-ExSetupVersion {
 #>
 
 if (-not $FromDateTime) {
-    $FromDateTime = [datetime]::MinValue
+    $FromDateTime = [DateTime]::MinValue
 }
 
 if (-not $ToDateTime) {
-    $ToDateTime = [datetime]::MaxValue
+    $ToDateTime = [DateTime]::MaxValue
 }
 
 if ($FromDateTime -ge $ToDateTime) {
@@ -2556,12 +2559,10 @@ if ($IncludeIISLog) {
 }
 
 # Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
-# With PowerShellv2, empty array is iterated.
-if ($IncludeExchangeLog.Count) {
-    foreach ($logType in $IncludeExchangeLog) {
-        Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
-        Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
-    }
+foreach ($logType in $IncludeExchangeLog) {
+    if (-not $logType) { continue } # With PowerShellv2, $null is iterated.
+    Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
+    Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
 }
 
 # Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
