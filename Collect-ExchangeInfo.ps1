@@ -242,7 +242,7 @@ function Compress-Folder {
         $NETFileSystemAvailable = $true
     }
     catch {
-        Write-Warning "System.IO.Compression.FileSystem wasn't found. Using alternate method"
+        Write-Verbose "System.IO.Compression.FileSystem wasn't found. Using alternate method"
     }
 
     $files = @(Get-ChildItem $Path -Recurse | Where-Object {-not $_.PSIsContainer})
