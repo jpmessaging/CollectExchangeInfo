@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-08-08"
+$version = "2020-08-25"
 #requires -Version 2.0
 
 <#
@@ -582,6 +582,9 @@ function Save-IISLog {
             $session = $null
             $session = New-PSSession -ComputerName $Server -ErrorAction Stop
             Invoke-Command -Session $session -ScriptBlock {
+                # Flush the log buffer
+                netsh http flush logbuffer | Out-Null
+                
                 Import-Module WebAdministration
                 $webSites = @(Get-Website)
                 foreach ($webSite in $webSites) {
@@ -606,6 +609,9 @@ function Save-IISLog {
     )
 
     if ($webSiteFound) {
+        # Give some time to flush log data.
+        Start-Sleep -Seconds 5
+        
         foreach ($webSiteGroup in $($webSites | Group-Object Directory)) {
             # Form a folder name.
             # There can be multiple web sites with different log directories. Save each directory to a different locations
@@ -728,6 +734,25 @@ function Save-TransportLog {
     $frontendTransport = $null
     if (Get-Command 'Get-FrontendTransportService' -ErrorAction SilentlyContinue) {
         $frontendTransport = Get-FrontendTransportService $Server -ErrorAction SilentlyContinue
+    }
+
+    # Before saving, try to flush the logs. This is a best effort.
+    # Sending control code 206 should flush the logs.
+    $flushSuccess = $false
+    foreach ($service in @('MSExchangeTransport', 'MSExchangeFrontEndTransport')) {
+        $serviceController = Get-Service $service -ComputerName $Server -ErrorAction SilentlyContinue
+        if ($serviceController) {
+            $err = $($serviceController.ExecuteCommand(206)) 2>&1
+            $serviceController.Dispose()
+            if (-not $flushSuccess -and $null -eq $err) {
+                $flushSuccess = $true
+            }
+        }
+    }
+
+    # Flush request was successful for at least one of services. So wait a little to give time to flush log data.
+    if ($flushSuccess) {
+        Start-Sleep -Seconds 5
     }
 
     foreach ($logType in $Type) {
