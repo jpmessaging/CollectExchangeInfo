@@ -2165,6 +2165,82 @@ function Get-ExSetupVersion {
     (Get-ItemProperty $exsetupPath).VersionInfo
 }
 
+function Get-ProxySettingInternal {
+    [CmdletBinding()]
+    param(
+    )
+        
+    $props = @{}
+
+    # Use Win32 WinHttpGetDefaultProxyConfiguration
+    # I'm not using "netsh winhttp show proxy", because the output is system language dependent.  Netsh just calls this function anyway.
+    $WinHttpDef = @'
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct WINHTTP_PROXY_INFO
+{
+    public uint dwAccessType;
+    public string lpszProxy;
+    public string lpszProxyBypass;
+}
+
+// From winhttp.h
+// WinHttpOpen dwAccessType values (also for WINHTTP_PROXY_INFO::dwAccessType)
+public enum ProxyAccessType
+{
+    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0,
+    WINHTTP_ACCESS_TYPE_NO_PROXY = 1,
+    WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3,
+    WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY = 4
+}
+
+[DllImport("winhttp.dll", SetLastError = true)]
+public static extern bool WinHttpGetDefaultProxyConfiguration(out WINHTTP_PROXY_INFO proxyInfo);
+'@
+
+    if (-not ('Win32.WinHttp' -as [type])) {
+        Add-Type -MemberDefinition $WinHttpDef -Name WinHttp -Namespace Win32
+    }
+
+    $proxyInfo = New-Object Win32.WinHttp+WINHTTP_PROXY_INFO
+    if ([Win32.WinHttp]::WinHttpGetDefaultProxyConfiguration([ref] $proxyInfo)) {
+        $props['WinHttpDirectAccess'] = $proxyInfo.dwAccessType -eq [Win32.WinHttp+ProxyAccessType]::WINHTTP_ACCESS_TYPE_NO_PROXY
+        $props['WinHttpProxyServer'] = $proxyInfo.lpszProxy
+        $props['WinHttpBypassList'] = $proxyInfo.lpszProxyBypass
+        $props['WINHTTP_PROXY_INFO'] = $proxyInfo # for debugging purpuse
+    }
+    else {
+        Write-Error ("Win32 WinHttpGetDefaultProxyConfiguration failed with 0x{0:x8}" -f [System.Runtime.InteropServices.Marshal]::GetLastWin32Error())
+    }
+
+    Write-Verbose "WinHttp*** properties correspond to WINHTTP_PROXY_INFO obtained by WinHttpGetDefaultProxyConfiguration. See https://docs.microsoft.com/en-us/windows/win32/api/winhttp/ns-winhttp-winhttp_current_user_ie_proxy_config"
+    New-Object PSCustomObject -Property $props
+}
+
+
+function Get-ProxySetting {
+    [CmdletBinding()]
+    param(    
+    [Alias('ComputerName')]
+    [string]$Server = $env:COMPUTERNAME
+    )
+
+    $session = $null
+    try {
+        $session = New-PSSession -ComputerName $Server -ErrorAction SilentlyContinue
+        if (-not $session) {
+            Write-Error "Cannot make a PSSesion to $Server."
+            return
+        }
+
+        Invoke-Command -Session $session -ScriptBlock ${Function:Get-ProxySettingInternal}
+    }
+    finally {
+        if ($session) {
+            Remove-PSSession $session
+        }
+    }
+}
+
 <#
   Main
 #>
@@ -2530,6 +2606,8 @@ Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -SkipIfN
 
 # MSInfo32
 # Get-MSInfo32 -Servers $directAccessServers
+
+Run Get-ProxySetting -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
 
 # WMI
 # Win32_powerplan is available in Win7 & above.
