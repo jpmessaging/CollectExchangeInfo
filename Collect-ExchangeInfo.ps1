@@ -584,7 +584,7 @@ function Save-IISLog {
             Invoke-Command -Session $session -ScriptBlock {
                 # Flush the log buffer
                 netsh http flush logbuffer | Out-Null
-                
+
                 Import-Module WebAdministration
                 $webSites = @(Get-Website)
                 foreach ($webSite in $webSites) {
@@ -611,7 +611,7 @@ function Save-IISLog {
     if ($webSiteFound) {
         # Give some time to flush log data.
         Start-Sleep -Seconds 5
-        
+
         foreach ($webSiteGroup in $($webSites | Group-Object Directory)) {
             # Form a folder name.
             # There can be multiple web sites with different log directories. Save each directory to a different locations
@@ -2169,7 +2169,7 @@ function Get-ProxySettingInternal {
     [CmdletBinding()]
     param(
     )
-        
+
     $props = @{}
 
     # Use Win32 WinHttpGetDefaultProxyConfiguration
@@ -2219,7 +2219,7 @@ public static extern bool WinHttpGetDefaultProxyConfiguration(out WINHTTP_PROXY_
 
 function Get-ProxySetting {
     [CmdletBinding()]
-    param(    
+    param(
     [Alias('ComputerName')]
     [string]$Server = $env:COMPUTERNAME
     )
@@ -2240,6 +2240,57 @@ function Get-ProxySetting {
         }
     }
 }
+
+function Get-NetworkInterface {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory =  $true)]
+        $Server
+    )
+
+    $scriptBlock = {
+        $nics = [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()
+        foreach ($nic in $nics) {
+            # Exract just the properties
+            $adapter = @{}
+            foreach ($prop in @($nic | Get-Member -MemberType Properties)) {
+                $adapter[$prop.Name] = $nic.$($prop.Name)
+            }
+
+            # Create another object from GetIPProperties() and embed it in the adapter object
+            # I need this because otherwise properties like UnicastAddresses become a plain string object.
+            $ipInfo = $nic.GetIPProperties()
+            $IPProperties = @{}
+            foreach ($prop in @($ipInfo | Get-Member -MemberType Properties)) {
+                $IPProperties[$prop.Name] = $ipInfo.$($prop.Name)
+            }
+
+            $adapter['IPProperties'] = New-Object PSCustomObject -Property $IPProperties
+
+            # This is the final object to return
+            New-Object PSCustomObject -property $adapter
+        }
+    }
+
+    if ($env:COMPUTERNAME -eq $Server) {
+        Invoke-Command -ScriptBlock $scriptBlock
+    }
+    else {
+        $session = $null
+        try {
+            $session = New-PSSession -ComputerName $Server
+            if ($session) {
+                Invoke-Command -Session $session -ScriptBlock $scriptBlock
+            }
+        }
+        finally {
+            if ($session) {
+                Remove-PSSession $session
+            }
+        }
+    }
+}
+
 
 <#
   Main
@@ -2607,7 +2658,8 @@ Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -SkipIfN
 # MSInfo32
 # Get-MSInfo32 -Servers $directAccessServers
 
-Run Get-ProxySetting -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
+Run Get-ProxySetting -Servers $directAccessServers -SkipIfNoServers
+Run Get-NetworkInterface -Server $directAccessServers -SkipIfNoServers
 
 # WMI
 # Win32_powerplan is available in Win7 & above.
