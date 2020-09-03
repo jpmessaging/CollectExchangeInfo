@@ -2224,6 +2224,11 @@ function Get-ProxySetting {
     [string]$Server = $env:COMPUTERNAME
     )
 
+    if ($env:COMPUTERNAME -eq $Server) {
+        Get-ProxySettingInternal
+        return
+    }
+
     $session = $null
     try {
         $session = New-PSSession -ComputerName $Server -ErrorAction SilentlyContinue
