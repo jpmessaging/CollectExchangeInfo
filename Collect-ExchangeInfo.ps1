@@ -2233,7 +2233,7 @@ function Get-ProxySetting {
     try {
         $session = New-PSSession -ComputerName $Server -ErrorAction SilentlyContinue
         if (-not $session) {
-            Write-Error "Cannot make a PSSesion to $Server."
+            Write-Error "Cannot make a PSSession to $Server."
             return
         }
 
@@ -2468,6 +2468,7 @@ Run Get-OwaMailboxPolicy
 Run Get-ResourceConfig
 Run Get-SmimeConfig
 Run Get-UserPrincipalNamesSuffix
+Run Get-AuthenticationPolicy
 Write-Log "Org done"
 
 # ActiveSync
