@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-08-25"
+$version = "2020-10-09"
 #requires -Version 2.0
 
 <#
