@@ -846,19 +846,9 @@ function Invoke-Ldifde {
     $filePath = Join-Path -Path $resolvedPath -ChildPath $FileName
 
     # Check if Ldifde.exe exists
-    $isLdifdeAvailable = $false
-    foreach ($path in $env:Path.Split(";")) {
-        if ($path) {
-            $exePath = Join-Path -Path $Path -ChildPath "ldifde.exe"
-            if (Test-Path $exePath) {
-                $IsLdifdeAvailable = $true;
-                break;
-            }
-        }
-    }
-
-    if (-not $isLdifdeAvailable ) {
-        throw "Ldifde is not available"
+    if (-not (Get-Command 'ldifde.exe' -ErrorAction SilentlyContinue)) {
+        Write-Error "Ldifde is not available"
+        return
     }
 
     if ($Script:OrgConfig) {
@@ -869,7 +859,8 @@ function Invoke-Ldifde {
     }
 
     if (-not $exorg) {
-        throw "Couldn't get Exchange org DN"
+        Write-Error "Couldn't get Exchange org DN"
+        return
     }
 
     # If this is an Edge server, use a port 50389.
