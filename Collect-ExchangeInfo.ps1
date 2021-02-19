@@ -128,7 +128,7 @@ param (
     [switch]$KeepOutputFiles
 )
 
-$version = "2020-10-09"
+$version = "2021-02-18"
 #requires -Version 2.0
 
 <#
@@ -290,7 +290,7 @@ function Compress-Folder {
                     ++$count
                 }
                 catch {
-                    Write-Error "Failed to add $($file.FullName). $_"
+                    Write-Error -Message "Failed to add $($file.FullName). $_" -Exception $_.Exception
                 }
                 finally {
                     if ($fileStream) {
@@ -524,7 +524,7 @@ function Save-Item {
             $zipCreated = ($null -ne $zipResult.ZipFilePath)
         }
         catch {
-            Write-Error "Cannot create a zip file on $Server. Each log file will be copied. $_"
+            Write-Error -Message "Cannot create a zip file on $Server. Each log file will be copied. $_" -Exception $_.Exception
             $script:SkipZipServers.Add($Server,$null)
         }
 
@@ -541,7 +541,7 @@ function Save-Item {
     else {
         # Manually copy
         #Copy-Item $SourcePath\* -Destination $DestitionPath -Recurse -Filter $Filter -Force
-        $files = @(Get-ChildItem $SourcePath -Recurse | Where-Object {-not $_.PSIsContainer})
+        $files = @(Get-ChildItem $SourcePath -Recurse -Filter $Filter | Where-Object {-not $_.PSIsContainer})
 
         if ($FromDateTime)  {
             $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
@@ -689,7 +689,7 @@ function Save-ExchangeLogging {
             $customPath = Get-DiagnosticsPath -Server $Server -ErrorAction SilentlyContinue
         }
         catch {
-            Write-Error "Get-DiagnosticsPath failed. $_."
+            Write-Error -Message "Get-DiagnosticsPath failed. $_." -Exception $_.Exception
         }
 
         if ($customPath) {
@@ -846,8 +846,8 @@ function Invoke-Ldifde {
     $filePath = Join-Path -Path $resolvedPath -ChildPath $FileName
 
     # Check if Ldifde.exe exists
-    if (-not (Get-Command 'ldifde.exe' -ErrorAction SilentlyContinue)) {
-        Write-Error "Ldifde is not available"
+    if (-not (Get-Command 'ldifde.exe' -ErrorAction SilentlyContinue -ErrorVariable err)) {
+        Write-Error "Ldifde is not available. $err"
         return
     }
 
@@ -2134,7 +2134,7 @@ function Get-IISWebBinding {
             Invoke-Command -Session $sess -ScriptBlock $block
         }
         catch {
-            Write-Error "Failed to invoke command on a remote session to $Server.$_"
+            Write-Error -Message "Failed to invoke command on a remote session to $Server.$_" -Exception $_.Exception
         }
         finally {
             if ($sess) {
@@ -2287,6 +2287,104 @@ function Get-NetworkInterface {
     }
 }
 
+<#
+Check the state of Transport's UnifiedContent folder.
+#>
+function Get-UnifiedContent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        $Server
+    )
+
+    # Only E2013 or later.
+    $exServer = Get-ExchangeServer $Server
+    if (-not $exServer.IsE15OrLater) {
+        Write-Log "Skipping $Server because it is E2010 or before."
+        return
+    }
+
+    # Find Transport's TemporaryStoragePath from config file.
+    $exchangePath  = Get-ExchangeInstallPath -Server $Server
+    $edgeConfigFile = Join-Path $exchangePath 'bin\EdgeTransport.exe.config'
+    $edgeConfigFileUNC = ConvertTo-UNCPath -Server $Server.ToString() -Path $edgeConfigFile
+
+    $reader = $null
+    try {
+        $reader = [IO.File]::OpenText($edgeConfigFileUNC)
+        $tempPath = $null
+        while ($line = $reader.ReadLine()) {
+            if ($line -match '<add key="TemporaryStoragePath" +value="(?<tempPath>.+)"') {
+                $tempPath = $Matches['tempPath']
+                break
+            }
+        }
+
+        if (-not $tempPath) {
+            Write-Error "Cannot find TemporaryStoragePath in $edgeConfigFileUNC"
+            return
+        }
+
+        $tempPathUNC = ConvertTo-UNCPath -Server $Server.ToString() -Path $tempPath
+        $unifiedContent = Join-Path $tempPathUNC 'UnifiedContent'
+
+        $totalSize = 0
+        $count = 0
+
+        Get-ChildItem $unifiedContent | ForEach-Object {
+            $totalSize += $_.Length
+            $count ++
+        }
+
+        New-Object PSCustomObject -Property @{
+            Server = $Server.ToString()
+            TemporaryStoragePath = $tempPath
+            TotalBytes = $totalSize
+            Count = $count
+        }
+    }
+    finally {
+        if ($reader) {
+            $reader.Dispose()
+        }
+    }
+}
+
+<#
+Save Exchange's application config files
+#>
+function Save-AppConfig {
+    [CmdletBinding()]
+    param(
+        # Where to save the file
+        [Parameter(Mandatory=$true)]
+        $Path,
+        [Parameter(Mandatory=$true)]
+        $Server
+    )
+
+    $exServer = Get-ExchangeServer $Server
+    if (-not $exServer.IsHubTransportServer) {
+        Write-Log "Skipping $Server because this is not a HubTransportServer."
+        return
+    }
+
+    $Folder = Join-Path $Path $Server
+    if (-not (Test-Path $Folder)) {
+        New-Item -ItemType Directory $Folder | Out-Null
+    }
+
+    $exchangePath  = Get-ExchangeInstallPath -Server $Server
+    $binFolder = Join-Path $exchangePath 'bin'
+    $binFolderUNC = ConvertTo-UNCPath -Server $Server -Path $binFolder
+
+    Save-Item -SourcePath $binFolderUNC -DestitionPath $Folder -Filter '*.exe.config' -SkipZip
+
+    # For now, web config files are not included.
+    # $casFolder = Join-Path $exchangePath 'ClientAccess'
+    # $casFolderUNC = ConvertTo-UNCPath -Server $Server -Path $casFolder
+    # Save-Item -SourcePath $casFolderUNC -DestitionPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
+}
 
 <#
   Main
@@ -2672,6 +2770,8 @@ Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifi
 Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
 
 Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers -SkipIfNoServers
+Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
