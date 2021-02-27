@@ -540,7 +540,6 @@ function Save-Item {
     }
     else {
         # Manually copy
-        #Copy-Item $SourcePath\* -Destination $DestitionPath -Recurse -Filter $Filter -Force
         $files = @(Get-ChildItem $SourcePath -Recurse -Filter $Filter | Where-Object {-not $_.PSIsContainer})
 
         if ($FromDateTime)  {
@@ -552,11 +551,17 @@ function Save-Item {
         }
 
         foreach ($file in $files) {
-            $destination = Join-Path $DestitionPath $file.Directory.Name
+            $destination = Join-Path $DestitionPath $file.DirectoryName.SubString($SourcePath.Length)
             if (-not (Test-Path $destination)) {
                 New-Item $destination -ItemType Directory | Out-Null
             }
-            Copy-Item $file.FullName -Destination $destination -Force
+
+            try {
+                Copy-Item $file.FullName -Destination $destination -Force
+            }
+            catch {
+                Write-Error $_
+            }
         }
 
         if ($files.Count -eq 0) {
@@ -655,7 +660,7 @@ function Save-HttpErr {
     # The path of HTTPERR log can be changed by:
     # HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\HTTP\Parameters\ErrorLoggingDir
     # But this should be rare. So just assume all servers use the default path.
-    $logPath = Join-Path $env:SystemRoot 'System32\LogFiles\HTTPERR'
+    $logPath = [IO.Path]::Combine($env:SystemRoot, 'System32\LogFiles\HTTPERR')
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-Path $Path -ChildPath $Server
@@ -679,8 +684,11 @@ function Save-ExchangeLogging {
     )
 
     # Default path: %ExchangeInstallPath% + $FolderPath
-    $exchangePath  = Get-ExchangeInstallPath -Server $Server
-    $logPath = Join-Path $exchangePath "Logging\$FolderPath"
+    $logPath = $null
+    $exchangePath = Get-ExchangeInstallPath -Server $Server
+    if ($exchangePath) {
+        $logPath = [IO.Path]::Combine($exchangePath, "Logging\$FolderPath")
+    }
 
     # Diagnostics path can be modified. So update the folder path if necessary
     if ($FolderPath -like 'Diagnostics\*') {
@@ -694,9 +702,14 @@ function Save-ExchangeLogging {
 
         if ($customPath) {
             $subPath = $FolderPath.Substring($FolderPath.IndexOf('\') + 1)
-            $logPath = Join-Path $customPath -ChildPath $subPath
+            $logPath = [IO.Path]::Combine($customPath, $subPath)
             Write-Log "[$($MyInvocation.MyCommand)] Custom Diagnostics path is found. Using $logPath"
         }
+    }
+
+    if (-not $logPath) {
+        Write-Error "Cannot fine the target log path."
+        return
     }
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
@@ -763,12 +776,12 @@ function Save-TransportLog {
             continue
         }
         $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
-        $destination = Join-Path $Path -ChildPath "$logType\$Server\Hub"
+        $destination = Join-Path $Path "$logType\$Server\Hub"
         Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 
         if ($frontendTransport -and $frontendTransport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
-            $destination = Join-Path $Path -ChildPath "$logType\$Server\FrontEnd"
+            $destination = Join-Path $Path "$logType\$Server\FrontEnd"
             Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
@@ -821,8 +834,8 @@ function Save-FastSearchLog {
         [DateTime]$ToDateTime
     )
 
-    $exsetupPath = Get-ExchangeInstallPath -Server $Server
-    $source = ConvertTo-UNCPath $(Join-Path $exsetupPath 'Bin\Search\Ceres\Diagnostics\Logs') -Server $Server
+    $exsetupPath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
+    $source = ConvertTo-UNCPath $([IO.Path]::Combine($exsetupPath, 'Bin\Search\Ceres\Diagnostics\Logs')) -Server $Server
     $destination = Join-path $Path -ChildPath $Server
     Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
@@ -1502,20 +1515,10 @@ function Get-SPN {
 
     $filePath = Join-Path -Path $Path -ChildPath "setspn.txt"
 
-    # Check if setspn.exe exists
-    $isSetSPNAvailable = $false
-    foreach ($path in $env:Path.Split(";")) {
-        if ($path) {
-            $exePath = Join-Path -Path $Path -ChildPath "setspn.exe"
-            if (Test-Path $exePath) {
-                $isSetSPNAvailable = $true;
-                break;
-            }
-        }
-    }
-
-    if (-not $isSetSPNAvailable) {
-        throw "setspn.exe is not available"
+    # Check if setspn.exe is available
+    if (-not (Get-Command 'setspn.exe' -ErrorAction SilentlyContinue)) {
+        Write-Error "setspn.exe is not available"
+        return
     }
 
     $writer = $null
@@ -1662,7 +1665,7 @@ function Save-ExchangeEventLog {
 
     # This is remote machine's path
     $winTempPath = Get-WindowsTempFolder -Server $Server
-    $winTempEventPath = Join-Path $winTempPath -ChildPath "EventLogs_$(Get-Date -Format "yyyyMMdd_HHmmss")"
+    $winTempEventPath = [IO.Path]::Combine($winTempPath, "EventLogs_$(Get-Date -Format "yyyyMMdd_HHmmss")")
     $uncWinTempEventPath = ConvertTo-UNCPath $winTempEventPath -Server $Server
 
     if (-not (Test-Path $uncWinTempEventPath -ErrorAction Stop)) {
@@ -1685,8 +1688,9 @@ function Save-ExchangeEventLog {
         # Export event logs to Windows' temp folder
         Write-Log "[$($MyInvocation.MyCommand)] Saving $log ..."
         $fileName = $log.Replace('/', '_') + '.evtx'
-        $localFilePath = Join-Path $winTempEventPath -ChildPath $fileName
+        $localFilePath = [IO.Path]::Combine($winTempEventPath, $fileName)
         wevtutil epl $log $localFilePath /ow /r:$Server
+        wevtutil al $localFilePath /r:$Server
     }
 
     Save-Item -SourcePath $uncWinTempEventPath -DestitionPath $destination
@@ -1720,7 +1724,7 @@ function Get-WindowsTempFolder {
         $Script:Win32OSCache.Add($Server, $win32os)
     }
 
-    Join-Path $win32os.WindowsDirectory -ChildPath "Temp"
+    [IO.Path]::Combine($win32os.WindowsDirectory, 'Temp')
 }
 
 <#
@@ -1747,9 +1751,10 @@ function Get-ExchangeInstallPath {
         $Script:Win32EnvCache.Add($Server, $win32env)
     }
 
-    $exchangePath = $win32env | Where-Object {$_.Name -eq 'ExchangeInstallPath'}
-    if (-not $exchangePath) {
-        throw "Cannt find ExchangeInstallPath on $Server"
+    $exchangePath = $win32env | Where-Object {$_.Name -eq 'ExchangeInstallPath'} | Select-Object -First 1
+    if (-not $exchangePath.VariableValue) {
+        Write-Error "Cannot find ExchangeInstallPath on $Server"
+        return
     }
 
     $exchangePath.VariableValue
@@ -2151,7 +2156,7 @@ function Get-ExSetupVersion {
         $Server
     )
 
-    $exsetupPath = Join-Path $(Get-ExchangeInstallPath -Server $Server) -ChildPath 'Bin\ExSetup.exe'
+    $exsetupPath = [IO.Path]::Combine($(Get-ExchangeInstallPath -Server $Server -ErrorAction Stop), 'Bin\ExSetup.exe')
     $exsetupPath = ConvertTo-UNCPath $exsetupPath -Server $Server
     (Get-ItemProperty $exsetupPath).VersionInfo
 }
@@ -2305,8 +2310,7 @@ function Get-UnifiedContent {
     }
 
     # Find Transport's TemporaryStoragePath from config file.
-    $exchangePath  = Get-ExchangeInstallPath -Server $Server
-    $edgeConfigFile = Join-Path $exchangePath 'bin\EdgeTransport.exe.config'
+    $edgeConfigFile = [IO.Path]::Combine($(Get-ExchangeInstallPath -Server $Server -ErrorAction Stop), 'bin\EdgeTransport.exe.config')
     $edgeConfigFileUNC = ConvertTo-UNCPath -Server $Server.ToString() -Path $edgeConfigFile
 
     $reader = $null
@@ -2374,14 +2378,14 @@ function Save-AppConfig {
         New-Item -ItemType Directory $Folder | Out-Null
     }
 
-    $exchangePath  = Get-ExchangeInstallPath -Server $Server
-    $binFolder = Join-Path $exchangePath 'bin'
+    $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
+    $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
     $binFolderUNC = ConvertTo-UNCPath -Server $Server -Path $binFolder
 
     Save-Item -SourcePath $binFolderUNC -DestitionPath $Folder -Filter '*.exe.config' -SkipZip
 
     # For now, web config files are not included.
-    # $casFolder = Join-Path $exchangePath 'ClientAccess'
+    # $casFolder = [IO.Path]::Combine($exchangePath, 'ClientAccess')
     # $casFolderUNC = ConvertTo-UNCPath -Server $Server -Path $casFolder
     # Save-Item -SourcePath $casFolderUNC -DestitionPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
 }
@@ -2439,7 +2443,7 @@ foreach ($paramName in $PSBoundParameters.Keys) {
             $sb.Append("$($var.Name):$($var.Value.ToUniversalTime().ToString('o')); ") | Out-Null
         }
         else {
-            $sb.Append("$($var.Name):$($var.Value); ") | Out-Null
+            $sb.Append("$($var.Name):$($var.Value -join ','); ") | Out-Null
         }
     }
 }
