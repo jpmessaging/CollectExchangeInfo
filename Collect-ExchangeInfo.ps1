@@ -2562,6 +2562,7 @@ Run Get-ResourceConfig
 Run Get-SmimeConfig
 Run Get-UserPrincipalNamesSuffix
 Run Get-AuthenticationPolicy
+Run Get-ClientAccessRule
 Write-Log "Org done"
 
 # ActiveSync
