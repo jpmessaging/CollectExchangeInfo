@@ -180,7 +180,13 @@ function Save-Object {
             }
 
             if ($WithCliXml) {
-                $objectList | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
+                try {
+                    # Export-Clixml could fail for non-CLS- compliant objects
+                    $objectList | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
+                }
+                catch {
+                    Write-Error "Export-CliXml failed. $_"
+                }
             }
 
             $objectList | Format-List * | Out-File ([System.IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
@@ -1280,6 +1286,23 @@ function Run {
                         $entry
                     }
                 }
+            }
+        )
+
+        # On a rare situation, you might get non-CLS-compliant objects. Trying to access a property causes a terminating error. So filter them out.
+        # For example, Get-MailboxDatabaseCopyStatus could return "Microsoft.Exchange.Cluster.Replay.FailedToOpenLogTruncContextException", which is not CLS-compliant.
+        $temp = @(
+            for ($i = 0; $i -lt $temp.Count; ++$i) {
+                try {
+                    # If GetType() fails, most likely this type is not CLS-compliant
+                    $temp[$i].GetType() | Out-Null
+                }
+                catch {
+                    Write-Log "$Command returned a non-CLS-compliant type"
+                    continue
+                }
+
+                $temp[$i]
             }
         )
 
