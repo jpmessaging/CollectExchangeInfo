@@ -181,7 +181,7 @@ function Save-Object {
 
             if ($WithCliXml) {
                 try {
-                    # Export-Clixml could fail for non-CLS- compliant objects
+                    # Export-Clixml could fail for non-CLS-compliant objects
                     $objectList | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
                 }
                 catch {
@@ -1174,13 +1174,27 @@ function RunCommand {
     }
     catch {
         # Log the terminating error.
-        Write-Log "[Terminating Error] '$Command' failed. $($_.ToString()) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
-        if ($null -ne $Script:errs) {$Script.errs.Add($_)}
+        try {
+            $_.GetType() | Out-Null
+            $_.Exception.GetType() | Out-Null
+            Write-Log "[Terminating Error] '$Command' failed. $($_.ToString()) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
+            if ($null -ne $Script:errs) {$Script.errs.Add($_)}
+        }
+        catch {
+            Write-Log "$Command threw a non-CLS-compliant exception object."
+        }
     }
     finally {
         if ($errs.Count) {
             foreach ($err in $errs) {
-                Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString()) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
+                try {
+                    $err.GetType() | Out-Null
+                    $err.Exception.GetType() | Out-Null
+                    Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString()) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
+                }
+                catch {
+                    Write-Log "$Command returned a non-CLS-compliant error object. $err"
+                }
             }
         }
 
