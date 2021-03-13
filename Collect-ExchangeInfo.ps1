@@ -2146,6 +2146,46 @@ function Get-SmbConfig {
     }
 }
 
+function Get-FipsAlgorithmPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [string]$Server
+    )
+
+    begin{}
+
+    process{
+        $hklm = $key = $null
+        try {
+            $hklm = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
+            $key = $hklm.OpenSubKey('SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy\')
+
+            if (-not $key) {
+                Write-Error "OpenSubKey failed for'SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy\' on $Server"
+                return
+            }
+
+            $enabled = $key.GetValue('Enabled', 0)
+
+            New-Object PSCustomObject -Property @{
+                ServerName = $Server
+                Enabled = $enabled -ne 0
+            }
+
+        }
+        catch {
+            Write-Error -ErrorRecord $_
+        }
+        finally {
+            if ($key) { $key.Close() }
+            if ($hklm) {$hklm.Close() }
+        }
+    }
+
+    end{}
+}
+
 function Get-IISWebBinding {
     [CmdletBinding()]
     param(
@@ -2426,6 +2466,7 @@ function Save-AppConfig {
     # $casFolderUNC = ConvertTo-UNCPath -Server $Server -Path $casFolder
     # Save-Item -SourcePath $casFolderUNC -DestitionPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
 }
+
 
 <#
   Main
@@ -2812,6 +2853,7 @@ Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifi
 Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
 
 Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers -SkipIfNoServers
 Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 
