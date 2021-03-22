@@ -125,10 +125,11 @@ param (
     [switch]$IncludeFastSearchLog,
     [Nullable[DateTime]]$FromDateTime,
     [Nullable[DateTime]]$ToDateTime,
-    [switch]$KeepOutputFiles
+    [switch]$SkipZip,
+    [switch]$SkipAutoUpdate
 )
 
-$version = "2021-03-02"
+$version = "2021-03-20"
 #requires -Version 2.0
 
 <#
@@ -282,9 +283,14 @@ function Compress-Folder {
             $zipStream = New-Object System.IO.FileStream -ArgumentList $zipFilePath, ([IO.FileMode]::Open)
             $zipArchive = New-Object System.IO.Compression.ZipArchive -ArgumentList $zipStream, ([IO.Compression.ZipArchiveMode]::Create)
             $count = 0
+            $prevProgress = 0
 
             foreach ($file in $files) {
-                Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Adding $($file.FullName)" -PercentComplete (100 * $count / $files.Count)
+                $progress = 100 * $count / $files.Count
+                if ($progress -gt $prevProgress + 10) {
+                    Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Please wait" -PercentComplete $progress
+                    $prevProgress = $progress
+                }
 
                 $fileStream = $zipEntryStream = $null
                 try {
@@ -2467,10 +2473,183 @@ function Save-AppConfig {
     # Save-Item -SourcePath $casFolderUNC -DestitionPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
 }
 
+function Get-InstalledUpdate
+{
+    [CmdletBinding()]
+    param(
+    [string]$Server = $env:COMPUTERNAME
+    )
+
+    function Get-InstalledUpdateInternal
+    {
+        [CmdletBinding()]
+        param()
+
+        # Ask items in AppUpdatesFolder from Shell
+        # FOLDERID_AppUpdates == a305ce99-f527-492b-8b1a-7e76fa98d6e4
+        $shell = $appUpdates = $null
+
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $appUpdates = $shell.NameSpace('Shell:AppUpdatesFolder')
+            if ($null -eq $appUpdates) {
+                Write-Log "Cannot obtain Shell:AppUpdatesFolder. Probabliy 32bit PowerShell is used on 64bit OS"
+                Write-Error "Cannot obtain Shell:AppUpdatesFolder"
+                return
+            }
+
+            $items = $appUpdates.Items()
+
+            foreach ($item in $items) {
+                # https://docs.microsoft.com/en-us/windows/win32/shell/folder-getdetailsof
+                New-Object PSCustomObject -Property @{
+                    Name        = $item.Name
+                    Program     = $appUpdates.GetDetailsOf($item, 2)
+                    Version     = $appUpdates.GetDetailsOf($item, 3)
+                    Publisher   = $appUpdates.GetDetailsOf($item, 4)
+                    URL         = $appUpdates.GetDetailsOf($item, 7)
+                    InstalledOn = $appUpdates.GetDetailsOf($item, 12)
+                }
+                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($item) | Out-Null
+            }
+        }
+        finally {
+            if ($appUpdates) {
+                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($appUpdates) | Out-Null
+            }
+            if ($shell) {
+                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+            }
+        }
+    }
+
+    if ($Server -eq $env:COMPUTERNAME) {
+        Get-InstalledUpdateInternal
+        return
+    }
+
+    $session = $null
+
+    try {
+        $session = New-PSSession -ComputerName $Server -ErrorAction Stop
+        Invoke-Command -Session $session -ScriptBlock ${Function:Get-InstalledUpdateInternal}
+    }
+    catch {
+        Write-Error -ErrorRecord $_
+    }
+    finally {
+        if ($session) {
+            Remove-PSSession $session
+        }
+    }
+}
+
+function Get-NLMConnectivity {
+    [CmdletBinding()]
+    param()
+
+    $CLSID_NetworkListManager = [Guid]'DCB00C01-570F-4A9B-8D69-199FDBA5723B'
+    $type = [Type]::GetTypeFromCLSID($CLSID_NetworkListManager)
+    $nlm = [Activator]::CreateInstance($type)
+
+    $isConnectedToInternet = $nlm.IsConnectedToInternet
+    $conn = $nlm.GetConnectivity()    
+
+    [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($nlm) | Out-Null
+    $nlm = $null
+
+    # NLM_CONNECTIVITY enumeration
+    # https://docs.microsoft.com/en-us/windows/win32/api/netlistmgr/ne-netlistmgr-nlm_connectivity
+
+    # From netlistmgr.h
+    $NLM_CONNECTIVITY = @{
+        NLM_CONNECTIVITY_DISCONNECTED      = 0
+        NLM_CONNECTIVITY_IPV4_NOTRAFFIC    = 1
+        NLM_CONNECTIVITY_IPV6_NOTRAFFIC    = 2
+        NLM_CONNECTIVITY_IPV4_SUBNET	   = 0x10
+        NLM_CONNECTIVITY_IPV4_LOCALNETWORK = 0x20
+        NLM_CONNECTIVITY_IPV4_INTERNET	   = 0x40
+        NLM_CONNECTIVITY_IPV6_SUBNET	   = 0x100
+        NLM_CONNECTIVITY_IPV6_LOCALNETWORK = 0x200
+        NLM_CONNECTIVITY_IPV6_INTERNET	   = 0x400
+    }
+
+    $connectivity = New-Object System.Collections.Generic.List[string]
+
+    foreach ($entry in $NLM_CONNECTIVITY.GetEnumerator()) {
+        if ($conn -band $entry.Value) {
+            $connectivity.Add($entry.Key)
+        }
+    }
+
+    [PSCustomObject]@{
+        IsConnectedToInternet = $isConnectedToInternet
+        Connectivity = $connectivity
+    }
+}
 
 <#
   Main
 #>
+
+# Check if a new version is available and use it if possible. This is just a best effort thing.
+$autoUpdateResult = "Skipped because of SkipAutoUpdate"
+if (-not $SkipAutoUpdate) {
+    if (-not (Get-Command 'Invoke-WebRequest' -ErrorAction SilentlyContinue)) {
+        $autoUpdateResult = "Skipped autoupdate because Invoke-WebRequest is not available (Probably running with PSv2)."
+    }
+    elseif (-not (Get-NLMConnectivity).IsConnectedToInternet) {
+        $autoUpdateResult = "Skipped autoupdate because there's no connectivity to internet."
+    }
+    else {
+        try {
+            Write-Progress -Activity "AutoUpdate" -Status 'Checking if the newer version is available. Please wait' -PercentComplete -1
+            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/jpmessaging/CollectExchangeInfo/releases/latest' -ErrorAction Stop
+
+            # release.name may look like "v2020-10-09". Extrace just the date.
+            $latestVersion = $release.name
+            if ($release.name -match '\d{4}-\d{2}-\d{2}') {
+                $latestVersion = $Matches[0]
+            }
+
+            if ($Version -ge $latestVersion) {
+                $autoUpdateResult = "Skipped because the script ($Version) is alreaydy the latest version"
+            }
+            else {
+                Write-Verbose "Downloading the latest script."
+                $response = Invoke-Command {
+                    # Suppress progress on Invoke-WebRequest.
+                    $ProgressPreference = "SilentlyContinue"
+                    Invoke-WebRequest -Uri $release.assets.browser_download_url -UseBasicParsing
+                }
+
+                # Rename the current script and replace with the latest one.
+                $scriptFilePath = $PSCmdlet.MyInvocation.MyCommand.Path
+                Rename-Item -LiteralPath $scriptFilePath -NewName "$([IO.Path]::GetFileNameWithoutExtension($scriptFilePath))_$(Get-Date -Format 'yyyyMMdd_HHmmss')$([IO.Path]::GetExtension($scriptFilePath))" -ErrorAction Stop
+                [IO.File]::WriteAllBytes($scriptFilePath, $response.Content)
+
+                Write-Verbose "Lastest script ($($release.name)) was successfully downloaded."
+                Write-Progress -Activity "AutoUpdate" -Status "done" -Completed
+                
+                $CollectExchangeInfo = Get-Command $scriptFilePath
+                if ($CollectExchangeInfo.Parameters.Keys.Contains('SkipAutoUpdate')) {
+                    & $scriptFilePath @PSBoundParameters -SkipAutoUpdate
+                }
+                else {
+                    & $scriptFilePath @PSBoundParameters
+                }
+
+                return
+            }
+        }
+        catch {
+            $autoUpdateResult = "Autoupdate failed. $_"
+        }
+        finally {
+            Write-Progress -Activity "AutoUpdate" -Status "done" -Completed
+        }
+    }
+}
 
 if (-not $FromDateTime) {
     $FromDateTime = [DateTime]::MinValue
@@ -2488,6 +2667,7 @@ $cmd = Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue
 if (-not $cmd) {
     throw "Get-OrganizationConfig is not available. Please run with Exchange Remote PowerShell session"
 }
+
 $OrgConfig = Get-OrganizationConfig
 $OrgName = $orgConfig.Name
 $IsExchangeOnline = $orgConfig.LegacyExchangeDN.StartsWith('/o=ExchangeLabs')
@@ -2511,6 +2691,8 @@ Write-Log "Organization Name = $OrgName"
 Write-Log "Script Version = $version"
 Write-Log "COMPUTERNAME = $env:COMPUTERNAME"
 Write-Log "IsExchangeOnline = $IsExchangeOnline"
+
+Write-Log "AutoUpdate: $autoUpdateResult"
 
 # Log parameters (raw values are in $PSBoundParameters, but want fixed-up values (e.g. Path)
 $sb = New-Object System.Text.StringBuilder
@@ -2856,6 +3038,7 @@ Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLate
 Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers -SkipIfNoServers
 Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+# Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
@@ -2940,17 +3123,19 @@ finally {
     Close-Log
 }
 
-Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
-Compress-Folder -Path:$Path -ZipFileName:$OrgName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath -IncludeDateTime | Out-Null
+$zipFileName = "$($OrgName)_$(Get-Date -Format "yyyyMMdd_HHmmss")"
 
-if (-not $KeepOutputFiles){
-    $err = $(Remove-Item $Path -Force) 2>&1
-    if ($err) {
-        Write-Warning "Failed to delete a temporary folder `"$Path`""
-    }
+if ($SkipZip) {
+    Rename-Item -LiteralPath $Path -NewName $zipFileName
+    return
 }
-else {
-    Write-Warning "Temporary folder `"$Path`" contains files collected"
+
+Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
+Compress-Folder -Path:$Path -ZipFileName:$zipFileName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath | Out-Null
+
+$err = $(Remove-Item $Path -Force) 2>&1
+if ($err) {
+    Write-Warning "Failed to delete a temporary folder `"$Path`""
 }
 
 Write-Progress -Activity $collectionActivity -Status "Done" -Completed
