@@ -1247,7 +1247,6 @@ function Run {
         [string]$Command,
         [string[]]$Servers,
         [string]$Identifier = "Server",
-        [switch]$SkipIfNoServers,
         [Parameter(ValueFromPipeline=$true)]
         [object[]]$ResultCollection,
         [switch]$RemoveDuplicate,
@@ -1286,10 +1285,10 @@ function Run {
         }
 
         $temp = @(
-            if (-not $Servers.Count -and -not $SkipIfNoServers) {
+            if (-not $PSBoundParameters.Keys.Contains('Servers')) {
                 RunCommand $Command -TimeoutSeconds $TimeoutSeconds
             }
-            elseif ($Servers) {
+            else {
                 foreach ($Server in $Servers) {
                     $firstTimeAddingServerName = $true
                     foreach ($entry in @(RunCommand "$Command -$Identifier $Server" -TimeoutSeconds $TimeoutSeconds)) {
@@ -1461,7 +1460,7 @@ function Get-VirtualDirectory {
         if ($command.Parameters -and $command.Parameters.ContainsKey('ShowMailboxVirtualDirectories')) {
             # if IncludeIISVirtualDirectories, then access direct access servers. otherwise, don't touch servers (only AD)
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
                     Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
             }
             else {
@@ -1470,7 +1469,7 @@ function Get-VirtualDirectory {
         }
         else {
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
                     Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
             }
             else {
@@ -2741,7 +2740,7 @@ Write-Log "Script Version = $version"
 Write-Log "COMPUTERNAME = $env:COMPUTERNAME"
 Write-Log "IsExchangeOnline = $IsExchangeOnline"
 
-Write-Log "AutoUpdate: $($autoUpdate.Message)"
+Write-Log "AutoUpdate: $(if ($SkipAutoUpdate) {'Skipped due to SkipAutoUpdate switch'} else {$autoUpdate.Message})"
 
 # Log parameters (raw values are in $PSBoundParameters, but want fixed-up values (e.g. Path)
 $sb = New-Object System.Text.StringBuilder
@@ -2903,11 +2902,11 @@ Run Get-EdgeSyncServiceConfig
 Run Get-EmailAddressPolicy
 Run Get-HostedContentFilterRule
 Run Get-IPAllowListConfig
-Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
+Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer})
 Run Get-IPAllowListProvider
 Run Get-IPAllowListProvidersConfig
 Run Get-IPBlockListConfig
-Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer}) -SkipIfNoServers
+Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer})
 Run Get-IPBlockListProvider
 Run Get-IPBlockListProvidersConfig
 Run Get-JournalRule
@@ -2946,7 +2945,7 @@ Run Get-ExchangeServer
 Run Get-MailboxServer
 
 # For CAS (>= E14) in DAS list, include ASA info
-Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object {$_.IsDirectAccess -and $_.IsClientAccessServer -and -$_.IsE14OrLater}) -Identifier:Identity -SkipIfNoServers -RemoveDuplicate -PassThru |
+Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object {$_.IsDirectAccess -and $_.IsClientAccessServer -and -$_.IsE14OrLater}) -Identifier:Identity -RemoveDuplicate -PassThru |
     Run "Get-ClientAccessServer -WarningAction:SilentlyContinue" -Identifier:Identity -RemoveDuplicate
 
 Run Get-ClientAccessArray
@@ -2965,13 +2964,13 @@ Write-Log "Server Done"
 # Database
 Write-Progress -Activity $collectionActivity -Status:"Database Settings" -PercentComplete:50
 
-Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
     Run "Get-MailboxDatabase -IncludePreExchange" -RemoveDuplicate
 
-Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -SkipIfNoServers -RemoveDuplicate -PassThru |
+Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
     Run "Get-PublicFolderDatabase" -RemoveDuplicate
 
-Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer}) -SkipIfNoServers
+Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer})
 Run Get-DAG
 Run Get-DatabaseAvailabilityGroupConfiguration
 if (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction:SilentlyContinue) {
@@ -2982,17 +2981,17 @@ Write-Log "Database Done"
 # Virtual Directories
 Write-Progress -Activity $collectionActivity -Status:"Virtual Directory Settings" -PercentComplete:60
 Run 'Get-VirtualDirectory'
-Run "Get-IISWebBinding" -Servers $directAccessServers -SkipIfNoServers -PassThru | Save-Object -Name WebBinding
+Run "Get-IISWebBinding" -Servers $directAccessServers -PassThru | Save-Object -Name WebBinding
 
 # Active Monitoring & Managed Availability
 Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:70
 Run Get-GlobalMonitoringOverride
-Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
-Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
+Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater})
+Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
 # Heath-related command are now commented out since rarely needed.
-# Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
-# Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity -SkipIfNoServers
-# Run Test-ServiceHealth -Servers:$directAccessServers -SkipIfNoServers
+# Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
+# Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
+# Run Test-ServiceHealth -Servers:$directAccessServers
 
 # Federation & Hybrid
 Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:75
@@ -3009,7 +3008,7 @@ Run Get-OutboundConnector
 
 # Exchange Certificate
 Write-Progress -Activity $collectionActivity -Status:"Exchange Certificate" -PercentComplete:80
-Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater}) -SkipIfNoServers
+Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater})
 
 # Throttling
 Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
@@ -3020,8 +3019,8 @@ Run Get-ThrottlingPolicy
 Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
 Run Get-MigrationConfig
 Run Get-MigrationEndpoint
-Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity -SkipIfNoServers
-# Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine -SkipIfNoServers # skipping, because gwmi Win32_Process is collected (see WMI section)
+Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity
+# Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine # skipping, because gwmi Win32_Process is collected (see WMI section)
 Run Get-OutlookProtectionRule
 Run Get-PolicyTipConfig
 Run Get-RbacDiagnosticInfo
@@ -3056,38 +3055,38 @@ Run Get-AntiPhishRule
 Run "Get-PhishFilterPolicy -SpoofAllowBlockList -Detailed"
 
 # .NET Framework Versions
-Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server -SkipIfNoServers
+Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server
 
 # TLS Settings
-Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
+Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server
 
 # TCPIP6
-Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server -SkipIfNoServers
+Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server
 
 # MSInfo32
 # Get-MSInfo32 -Servers $directAccessServers
 
-Run Get-ProxySetting -Servers $directAccessServers -SkipIfNoServers
-Run Get-NetworkInterface -Server $directAccessServers -SkipIfNoServers
+Run Get-ProxySetting -Servers $directAccessServers
+Run Get-NetworkInterface -Server $directAccessServers
 
 # WMI
 # Win32_powerplan is available in Win7 & above.
-Run 'Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PowerPlan
-Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_PageFileSetting
-Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_ComputerSystem
-Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -SkipIfNoServers -PassThru | Save-Object -Name Win32_OperatingSystem
-Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru |
+Run 'Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PowerPlan
+Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PageFileSetting
+Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_ComputerSystem
+Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_OperatingSystem
+Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -PassThru |
     Where-Object {$_.IPEnabled} | Save-Object -Name Win32_NetworkAdapterConfiguration
-Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -SkipIfNoServers -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
+Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
 
 # Get Exsetup version
-Run "Get-ExSetupVersion" -Servers $directAccessServers -SkipIfNoServers
+Run "Get-ExSetupVersion" -Servers $directAccessServers
 
-Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
-Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
-Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers -SkipIfNoServers
-Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
-# Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
+Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
+Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers
+Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
+# Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
 
 if ($IsExchangeOnline) {
     Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
@@ -3106,49 +3105,49 @@ if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
 
     $eventLogPath = Join-Path $Path -ChildPath 'EventLog'
     if ($IncludeEventLogsWithCrimson) {
-        Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers -SkipIfNoServers
+        Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers
     }
     else {
-        Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers -SkipIfNoServers
+        Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers
     }
 }
 
 # Collect Perfmon Log
 if ($IncludePerformanceLog) {
     Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
-    Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater}) -SkipIfNoServers
+    Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
 }
 
 # Collect IIS Log
 if ($IncludeIISLog) {
     Write-Progress -Activity $collectionActivity -Status:"IIS Log" -PercentComplete:90
-    Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
-    Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+    Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
 }
 
 # Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
 foreach ($logType in $IncludeExchangeLog) {
     if (-not $logType) { continue } # With PowerShellv2, $null is iterated.
     Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
-    Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
 }
 
 # Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
 if ($IncludeTransportLog.Count) {
     Write-Progress -Activity $collectionActivity -Status:"Transport Logs" -PercentComplete:90
-    Run "Save-TransportLog -Path:`"$(Join-Path $Path 'TransportLog')`" -Type:$($IncludeTransportLog -join ',') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-TransportLog -Path:`"$(Join-Path $Path 'TransportLog')`" -Type:$($IncludeTransportLog -join ',') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
 }
 
 # Collect Exchange Setup logs (Currently not used. If there's any demand, activate it)
 if ($IncludeExchangeSetupLog) {
     Write-Progress -Activity $collectionActivity -Status:"Exchange Setup Logs" -PercentComplete:90
-    Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers
 }
 
 # Collect Fast Search ULS logs
 if ($IncludeFastSearchLog) {
     Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
-    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearchLog) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers -SkipIfNoServers
+    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearchLog) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
 }
 
 # Save errors
@@ -3176,15 +3175,15 @@ $zipFileName = "$($OrgName)_$(Get-Date -Format "yyyyMMdd_HHmmss")"
 
 if ($SkipZip) {
     Rename-Item -LiteralPath $Path -NewName $zipFileName
-    return
 }
+else {
+    Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
+    Compress-Folder -Path:$Path -ZipFileName:$zipFileName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath | Out-Null
 
-Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
-Compress-Folder -Path:$Path -ZipFileName:$zipFileName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath | Out-Null
-
-$err = $(Remove-Item $Path -Force) 2>&1
-if ($err) {
-    Write-Warning "Failed to delete a temporary folder `"$Path`""
+    $err = $(Remove-Item $Path -Force) 2>&1
+    if ($err) {
+        Write-Warning "Failed to delete a temporary folder `"$Path`""
+    }
 }
 
 Write-Progress -Activity $collectionActivity -Status "Done" -Completed
