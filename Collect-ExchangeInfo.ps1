@@ -2835,7 +2835,7 @@ foreach ($server in $allExchangeServers) {
 $transcriptPath = Join-Path -Path $Path -ChildPath "transcript.txt"
 $transcriptEnabled = $false
 try {
-    Start-Transcript -Path $transcriptPath -NoClobber -ErrorAction:Stop
+    Start-Transcript -Path $transcriptPath -NoClobber -ErrorAction:Stop | Out-Null
     $transcriptEnabled = $true
 }
 catch {
@@ -3168,7 +3168,7 @@ finally {
 
     # release transcript file even when script is stopped in the middle.
     if ($transcriptEnabled) {
-        Stop-Transcript
+        $(Stop-Transcript) 2>&1 | Out-Null
     }
 }
 
