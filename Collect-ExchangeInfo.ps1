@@ -126,10 +126,11 @@ param (
     [Nullable[DateTime]]$FromDateTime,
     [Nullable[DateTime]]$ToDateTime,
     [switch]$SkipZip,
-    [switch]$SkipAutoUpdate
+    [switch]$SkipAutoUpdate,
+    [switch]$TrustAllCertificates
 )
 
-$version = "2021-03-20"
+$version = "2021-03-24"
 #requires -Version 2.0
 
 <#
@@ -2553,7 +2554,7 @@ function Get-NLMConnectivity {
     $nlm = [Activator]::CreateInstance($type)
 
     $isConnectedToInternet = $nlm.IsConnectedToInternet
-    $conn = $nlm.GetConnectivity()    
+    $conn = $nlm.GetConnectivity()
 
     [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($nlm) | Out-Null
     $nlm = $null
@@ -2589,22 +2590,27 @@ function Get-NLMConnectivity {
 }
 
 <#
-  Main
+Check GitHub's latest release and if it's newer, download and import it except if OutlookTrace is installed as module.
 #>
+function Invoke-AutoUpdate {
+    [CmdletBinding()]
+    param(
+        [uri]$GitHubUri = 'https://api.github.com/repos/jpmessaging/CollectExchangeInfo/releases/latest'
+    )
 
-# Check if a new version is available and use it if possible. This is just a best effort thing.
-$autoUpdateResult = "Skipped because of SkipAutoUpdate"
-if (-not $SkipAutoUpdate) {
+    $autoUpdateSuccess = $false
+    $message = $null
+
     if (-not (Get-Command 'Invoke-WebRequest' -ErrorAction SilentlyContinue)) {
-        $autoUpdateResult = "Skipped autoupdate because Invoke-WebRequest is not available (Probably running with PSv2)."
+        $message = "Skipped autoupdate because Invoke-WebRequest is not available (Probably running with PSv2)."
     }
     elseif (-not (Get-NLMConnectivity).IsConnectedToInternet) {
-        $autoUpdateResult = "Skipped autoupdate because there's no connectivity to internet."
+        $message = "Skipped autoupdate because there's no connectivity to internet."
     }
     else {
         try {
-            Write-Progress -Activity "AutoUpdate" -Status 'Checking if the newer version is available. Please wait' -PercentComplete -1
-            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/jpmessaging/CollectExchangeInfo/releases/latest' -ErrorAction Stop
+            Write-Progress -Activity "AutoUpdate" -Status 'Checking if a newer version is available. Please wait' -PercentComplete -1
+            $release = Invoke-RestMethod -Uri $GitHubUri -ErrorAction Stop
 
             # release.name may look like "v2020-10-09". Extrace just the date.
             $latestVersion = $release.name
@@ -2613,7 +2619,7 @@ if (-not $SkipAutoUpdate) {
             }
 
             if ($Version -ge $latestVersion) {
-                $autoUpdateResult = "Skipped because the script ($Version) is alreaydy the latest version"
+                $message = "Skipped because the current script ($Version) is newer than GitHub's latest release ($($release.name))."
             }
             else {
                 Write-Verbose "Downloading the latest script."
@@ -2624,30 +2630,73 @@ if (-not $SkipAutoUpdate) {
                 }
 
                 # Rename the current script and replace with the latest one.
-                $scriptFilePath = $PSCmdlet.MyInvocation.MyCommand.Path
-                Rename-Item -LiteralPath $scriptFilePath -NewName "$([IO.Path]::GetFileNameWithoutExtension($scriptFilePath))_$(Get-Date -Format 'yyyyMMdd_HHmmss')$([IO.Path]::GetExtension($scriptFilePath))" -ErrorAction Stop
-                [IO.File]::WriteAllBytes($scriptFilePath, $response.Content)
+                Rename-Item -LiteralPath $PSCommandPath -NewName "$([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))_$(Get-Date -Format 'yyyyMMdd_HHmmss')$([IO.Path]::GetExtension($PSCommandPath))" -ErrorAction Stop
+                [IO.File]::WriteAllBytes($PSCommandPath, $response.Content)
 
                 Write-Verbose "Lastest script ($($release.name)) was successfully downloaded."
-                Write-Progress -Activity "AutoUpdate" -Status "done" -Completed
-                
-                $CollectExchangeInfo = Get-Command $scriptFilePath
-                if ($CollectExchangeInfo.Parameters.Keys.Contains('SkipAutoUpdate')) {
-                    & $scriptFilePath @PSBoundParameters -SkipAutoUpdate
-                }
-                else {
-                    & $scriptFilePath @PSBoundParameters
-                }
-
-                return
+                $autoUpdateSuccess = $true
             }
         }
         catch {
-            $autoUpdateResult = "Autoupdate failed. $_"
+            $message = "Autoupdate failed. $_"
         }
         finally {
             Write-Progress -Activity "AutoUpdate" -Status "done" -Completed
         }
+    }
+        New-Object PSCustomObject -Property @{
+            Success = $autoUpdateSuccess
+            Message = $message
+        }
+}
+
+
+<#
+  Main
+#>
+
+# This is just for testing.
+$TrustAllCertificatePolicyDefinition = @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+
+public class TrustAllCertsPolicy : ICertificatePolicy
+{
+    public bool CheckValidationResult(ServicePoint srvPoint, X509Certificate certificate, WebRequest request, int certificateProblem)
+    {
+        return true;
+    }
+}
+"@
+
+if ($TrustAllCertificates) {
+    if (-not ("TrustAllCertsPolicy" -as [type])) {
+        Add-Type $TrustAllCertificatePolicyDefinition
+    }
+
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+}
+
+# Check if a new version is available and use it if possible. This is just a best effort thing.
+if (-not $SkipAutoUpdate) {
+    $autoUpdate = Invoke-AutoUpdate
+    if ($autoUpdate.Success) {
+        $updatedSelf = Get-Command $PSCommandPath
+
+        # Get the list of current parameters that's also available in the updated cmdlet
+        $params = @{}
+        foreach ($currentParam in $PSBoundParameters.GetEnumerator()) {
+            if ($updatedSelf.Parameters.keys.Contains($currentParam.Key)) {
+                $params.Add($currentParam.Key, $currentParam.Value)
+            }
+        }
+
+        if ($updatedSelf.Parameters.keys.Contains('SkipAutoUpdate')) {
+            $params.Add('SkipAutoUpdate', $true)
+        }
+
+        & $updatedSelf @params
+        return
     }
 }
 
@@ -2692,7 +2741,7 @@ Write-Log "Script Version = $version"
 Write-Log "COMPUTERNAME = $env:COMPUTERNAME"
 Write-Log "IsExchangeOnline = $IsExchangeOnline"
 
-Write-Log "AutoUpdate: $autoUpdateResult"
+Write-Log "AutoUpdate: $($autoUpdate.Message)"
 
 # Log parameters (raw values are in $PSBoundParameters, but want fixed-up values (e.g. Path)
 $sb = New-Object System.Text.StringBuilder
@@ -3113,14 +3162,14 @@ if ($Script:errs.Count) {
 
 } # end of try for transcript
 finally {
+    Remove-Runspace
+    Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
+    Close-Log
+
     # release transcript file even when script is stopped in the middle.
     if ($transcriptEnabled) {
         Stop-Transcript
     }
-
-    Remove-Runspace
-    Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
-    Close-Log
 }
 
 $zipFileName = "$($OrgName)_$(Get-Date -Format "yyyyMMdd_HHmmss")"
