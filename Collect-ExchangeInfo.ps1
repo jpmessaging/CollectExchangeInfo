@@ -68,9 +68,16 @@ IncludePerformanceLog, IncludeIISLog, IncludeExchangeLog, IncludeTransportLog, a
 Log files whose LastWriteTime is less than or equal to this value are collected for the following log types:
 IncludePerformanceLog, IncludeIISLog, IncludeExchangeLog, IncludeTransportLog, and IncludeFastSearchLog.
 
-.PARAMETER KeepOutputFiles
-Switch to keep the output files. If this is not specified, all the output files will be deleted after being packed to a zip file.
-In order to avoid deleting unrelated files or folders, this script makes sure that the folder specified by Path paramter is empty and if not empty, it stops executing.
+.PARAMETER SkipZip
+Switch to skip creating a ZIP file. If this is not specified, all the output files will be packed intto a zip file.
+
+.PARAMETER SkipAutoUpdate
+Switch to skip auto update. Wihtout this switch, the script first checks to see if there is a newer version available in GitHub repository. If so, it downloads and runs it instead.
+This is a best-effort and any failure won't stop the script's execution.
+
+.PARAMETER TrustAllCertificates
+Switch to suppress certificate check when accessing a remote web server. This is for the aforementioned auto update.
+This script does not access any external web site other than its GitHub repository.
 
 .EXAMPLE
 .\Collect-ExchangeInfo -Path .\exinfo -Servers:*
@@ -141,7 +148,7 @@ function Save-Object {
     Param(
         #[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
         [Parameter(ValueFromPipeline=$true)]
-        $object,
+        $Object,
         $Name,
         [string]$Path = $Script:Path,
         [bool]$WithCliXml = $true,
@@ -149,49 +156,50 @@ function Save-Object {
     )
 
     begin {
-        # Need to accumulate result to support pipeline. Use List<> to improve performance
-        $objectList = New-Object System.Collections.Generic.List[object]
+        # This list accumulate objects to support pipeline. This will be lazily initialized.
+        $objectList = $null
         [string]$objectName = $Name
     }
 
     process {
-        # Validate the given objects.  If valid, collect them in a list.
+        # Validate the given objects. If valid, collect them in a list.
         # Collected objects are outputted in the END block
 
         # When explicitly passed, object is actually a list of objects.
         # When passed from pipeline, object is a single object.
         # To deal with this, use foreach.
 
-        foreach ($o in $object) {
+        foreach ($o in $Object) {
             if ($null -eq $o) {
-                return
+                continue
             }
-            else {
-                if (-not($objectName)) {
-                    $objectName = $o.GetType().Name
-                }
-                $objectList.Add($o)
+
+            if (-not $objectName) {
+                $objectName = $o.GetType().Name
             }
+
+            if ($null -eq $objectList) {
+                $objectList = New-Object System.Collections.Generic.List[object]
+            }
+
+            $objectList.Add($o)
+
         }
     }
 
     end {
         if ($objectList.Count -gt 0) {
-            if(-not $objectName) {
-                Write-Log "[$($MyInvocation.MyCommand)] Error:objectName is null"
-            }
-
             if ($WithCliXml) {
                 try {
                     # Export-Clixml could fail for non-CLS-compliant objects
-                    $objectList | Export-Clixml -Path:([System.IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
+                    $objectList | Export-Clixml -Path:([IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
                 }
                 catch {
                     Write-Error "Export-CliXml failed. $_"
                 }
             }
 
-            $objectList | Format-List * | Out-File ([System.IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
+            $objectList | Format-List * | Out-File ([IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
         }
     }
 }
@@ -1255,14 +1263,19 @@ function Run {
     )
 
     begin {
-        $result = New-Object System.Collections.Generic.List[object]
+        # This will hold both the pipelined objects and output objects. This will be lazily initialized.
+        $result = $null
     }
+
     # Accumulate the previous results
     process {
         # Make sure not to add $null and collection itself
         foreach ($pipedObj in $ResultCollection) {
             # In PowerShellV2, $null is iterated over.
             if ($pipedObj) {
+                if ($null -eq $result) {
+                    $result = New-Object System.Collections.Generic.List[object]
+                }
                 $result.Add($pipedObj)
             }
         }
@@ -1285,10 +1298,10 @@ function Run {
         }
 
         $temp = @(
-            if (-not $PSBoundParameters.Keys.Contains('Servers')) {
+            if (-not $PSBoundParameters.ContainsKey('Servers')) {
                 RunCommand $Command -TimeoutSeconds $TimeoutSeconds
             }
-            else {
+            elseif ($Servers.Count) {
                 foreach ($Server in $Servers) {
                     $firstTimeAddingServerName = $true
                     foreach ($entry in @(RunCommand "$Command -$Identifier $Server" -TimeoutSeconds $TimeoutSeconds)) {
@@ -1334,7 +1347,7 @@ function Run {
         for ($i = 0; $i -lt $temp.Count; ++$i) {
             if ($null -ne $temp[$i].serializationData) {
                 try {
-                    $stream = New-Object system.io.memoryStream -ArgumentList (, $temp[$i].serializationData)
+                    $stream = New-Object System.IO.MemoryStream -ArgumentList (, $temp[$i].serializationData)
                     $temp[$i] = $Script:formatter.Deserialize($stream)
                 }
                 catch {
@@ -1348,10 +1361,24 @@ function Run {
             }
         }
 
+        # Shortcut. If there was no pipelined objects and no output at this point, there's nothing else to do.
+        if (-not $result.Count -and -not $temp.Count) {
+            return
+        }
+
         if (-not $RemoveDuplicate) {
-            $result.AddRange($temp)
+            if ($null -eq $result) {
+                $result = $temp
+            }
+            else {
+                $result.AddRange($temp)
+            }
         }
         else {
+            if ($null -eq $result) {
+                $result = New-Object System.Collections.Generic.List[object]
+            }
+
             # Check duplicates
             foreach ($o in $temp) {
                 if ($skipDupCheck) {
@@ -2629,7 +2656,12 @@ function Invoke-AutoUpdate {
                 }
 
                 # Rename the current script and replace with the latest one.
-                Rename-Item -LiteralPath $PSCommandPath -NewName "$([IO.Path]::GetFileNameWithoutExtension($PSCommandPath))_$(Get-Date -Format 'yyyyMMdd_HHmmss')$([IO.Path]::GetExtension($PSCommandPath))" -ErrorAction Stop
+                $newName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath) + "_" + $Version + [IO.Path]::GetExtension($PSCommandPath)
+                if (Test-Path (Join-Path ([IO.Path]::GetDirectoryName($PSCommandPath)) $newName)) {
+                    $newName = [IO.Path]::GetFileNameWithoutExtension($PSCommandPath) + "_" + $Version + [IO.Path]::GetRandomFileName() + [IO.Path]::GetExtension($PSCommandPath)
+                }
+
+                Rename-Item -LiteralPath $PSCommandPath -NewName $newName -ErrorAction Stop
                 [IO.File]::WriteAllBytes($PSCommandPath, $response.Content)
 
                 Write-Verbose "Lastest script ($($release.name)) was successfully downloaded."
@@ -2685,12 +2717,12 @@ if (-not $SkipAutoUpdate) {
         # Get the list of current parameters that's also available in the updated cmdlet
         $params = @{}
         foreach ($currentParam in $PSBoundParameters.GetEnumerator()) {
-            if ($updatedSelf.Parameters.keys.Contains($currentParam.Key)) {
+            if ($updatedSelf.Parameters.ContainsKey($currentParam.Key)) {
                 $params.Add($currentParam.Key, $currentParam.Value)
             }
         }
 
-        if ($updatedSelf.Parameters.keys.Contains('SkipAutoUpdate')) {
+        if ($updatedSelf.Parameters.ContainsKey('SkipAutoUpdate')) {
             $params.Add('SkipAutoUpdate', $true)
         }
 
@@ -3159,9 +3191,15 @@ if ($Script:errs.Count) {
     $Script.errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
 }
 
+$allDone = $true
 } # end of try for transcript
 finally {
     Remove-Runspace
+
+    if (-not $allDone) {
+        Write-Log "Script was interrupted in the middle of execution."
+    }
+
     Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
     Close-Log
 
@@ -3174,17 +3212,20 @@ finally {
 $zipFileName = "$($OrgName)_$(Get-Date -Format "yyyyMMdd_HHmmss")"
 
 if ($SkipZip) {
-    Rename-Item -LiteralPath $Path -NewName $zipFileName
+    # PSv2 does not have LiteralPath parameter.
+    Rename-Item -Path $Path -NewName $zipFileName
 }
 else {
     Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
-    Compress-Folder -Path:$Path -ZipFileName:$zipFileName -RemoveFiles:(-not $KeepOutputFiles) -Destination:$originalPath | Out-Null
+    Compress-Folder -Path:$Path -ZipFileName:$zipFileName -Destination:$originalPath | Out-Null
 
-    $err = $(Remove-Item $Path -Force) 2>&1
+    $err = $(Remove-Item $Path -Force -Recurse) 2>&1
     if ($err) {
-        Write-Warning "Failed to delete a temporary folder `"$Path`""
+        Write-Warning "Failed to delete a temporary folder `"$Path`". $err"
     }
 }
 
 Write-Progress -Activity $collectionActivity -Status "Done" -Completed
-Write-Host "Done!" -ForegroundColor Green
+if ($allDone) {
+    Write-Host "Done!" -ForegroundColor Green
+}
