@@ -7,7 +7,7 @@ Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成
 
 より詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2021-03-02/Collect-ExchangeInfo.ps1)
+[ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2021-03-24/Collect-ExchangeInfo.ps1)
 
 Load-Clixml.ps1 は `Load-CliXml` コマンドレットのみ含むファイルです。`Load-CliXml` はフォルダ内の XML ファイルをまとめて `Import-CliXml` にて取り込み、グローバル スコープに対応する変数を作成します。例えば、"ExchangeServer.xml" に対して変数 `$ExchangeServer` を作成します。Load-Clixml.ps1 は Collect-ExchangeInfo.ps1 で取得したデータを取り込むために作成したものであり、Collect-ExchangeInfo.ps1 の実行に必要なものではありません。
 
