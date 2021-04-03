@@ -451,6 +451,272 @@ function Compress-Folder {
     }
 }
 
+
+function Compress-Folder2 {
+    [CmdletBinding()]
+    param(
+        # Folder path to compress
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        # Destination folder path
+        [Parameter(Mandatory=$true)]
+        [string]$Destination,
+        # Filter for items in $Path
+        [string]$Filter,
+        # DateTime filters
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime,
+        [ValidateSet('Any', 'Zip', 'Cab')]
+        $ArchiveType = 'Any'
+    )
+
+    if (Test-Path $Path) {
+        $Path = Resolve-Path -LiteralPath $Path
+    }
+    else {
+        Write-Error "$Path is not found"
+        return
+    }
+
+    if (Test-Path $Destination) {
+        $Destination = Resolve-Path -LiteralPath $Destination
+    }
+    else {
+        $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+    }
+
+    # Apply filters if any.
+    if ($PSBoundParameters.ContainsKey('Filter')) {
+        $files = @(Get-ChildItem -LiteralPath $Path -Filter $Filter -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+    }
+    else {
+        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+    }
+
+    if ($PSBoundParameters.ContainsKey('FromDateTime')) {
+        $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+    }
+
+    if ($PSBoundParameters.ContainsKey('ToDateTime')) {
+        $files = @($files | Where-Object {$_.LastWriteTime -ge $ToDateTime})
+    }
+
+    # If there are no files after filters are applied, bail.
+    if ($files.Count -eq 0) {
+        New-Object PSCustomObject -Property @{
+            ArchivePath = $null
+        }
+        return
+    }
+
+    # Check if .NET Framework's compression is avaiable.
+    $zipArchiveAvailable = $false
+    try {
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+        $zipArchiveAvailable = $true
+    }
+    catch {
+        Write-Verbose "System.IO.Compression wasn't found."
+    }
+
+    # Check if makecab.exe is available.
+    $cabArchiveAvailable = $false
+    if ($makeCab = Get-Command 'makecab.exe' -ErrorAction SilentlyContinue) {
+        $cabArchiveAvailable = $true
+    }
+    
+    if (-not 
+        (($ArchiveType -eq 'Any' -and ($zipArchiveAvailable -or $cabArchiveAvailable) -or 
+        ($ArchiveType -eq 'Zip' -and $zipArchiveAvailable) -or 
+        ($ArchiveType -eq 'Cab' -and $cabArchiveAvailable)))) {
+            Write-Error "Requested archive type '$ArchiveType' is not available."
+            return
+        }
+
+    if ($zipArchiveAvailable -and $ArchiveType -ne 'Cab') {
+        # Create a ZIP file
+        $zipFileName = Split-Path $Path -Leaf
+        $zipFilePath = Join-Path $Destination -ChildPath "$zipFileName.zip"
+
+        if (Test-Path $zipFilePath) {
+            # Append a randome string to the zip file name.
+            $zipFileName =  $zipFileName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
+            $zipFilePath = Join-Path $Destination $zipFileName
+        }
+
+        $zipStream = $zipArchive = $null
+        try {
+            New-Item $zipFilePath -ItemType file | Out-Null
+
+            $zipStream = New-Object System.IO.FileStream -ArgumentList $zipFilePath, ([IO.FileMode]::Open)
+            $zipArchive = New-Object System.IO.Compression.ZipArchive -ArgumentList $zipStream, ([IO.Compression.ZipArchiveMode]::Create)
+            $count = 0
+            $prevProgress = 0
+
+            foreach ($file in $files) {
+                $progress = 100 * $count / $files.Count
+                if ($progress -ge $prevProgress + 10) {
+                    Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Please wait" -PercentComplete $progress
+                    $prevProgress = $progress
+                }
+
+                $fileStream = $zipEntryStream = $null
+                try {
+                    $fileStream = New-Object System.IO.FileStream -ArgumentList $file.FullName, ([IO.FileMode]::Open), ([IO.FileAccess]::Read), ([IO.FileShare]::ReadWrite)
+                    $zipEntry = $zipArchive.CreateEntry($file.FullName.Substring($Path.Length + 1))
+                    $zipEntryStream = $zipEntry.Open()
+                    $fileStream.CopyTo($zipEntryStream)
+
+                    ++$count
+                }
+                catch {
+                    Write-Error -Message "Failed to add $($file.FullName). $_" -Exception $_.Exception
+                }
+                finally {
+                    if ($fileStream) {
+                        $fileStream.Dispose()
+                    }
+
+                    if ($zipEntryStream) {
+                        $zipEntryStream.Dispose()
+                    }
+                }
+            }
+        }
+        finally {
+            if ($zipArchive) {
+                $zipArchive.Dispose()
+            }
+
+            if ($zipStream) {
+                $zipStream.Dispose()
+            }
+
+            Write-Progress -Activity "Creating a zip file $zipFilePath" -Status "Done" -Completed
+            $archivePath = $zipFilePath
+        }
+
+    }
+    else {
+        $newCab = Get-Command New-Cab
+        $params = @{}
+        foreach ($p in $PSBoundParameters.GetEnumerator()) {
+            if ($newCab.Parameters.ContainsKey($p.Key)) {
+                $params.Add($p.Key, $p.Value)
+            }
+        }
+
+        $cab = New-Cab @params
+        $archivePath = $cab.ArchivePath
+    }
+
+    New-Object PSCustomObject -Property @{
+        ArchivePath = $archivePath
+    }
+}
+
+# https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/makecab
+# https://docs.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)
+# https://ss64.org/viewtopic.php?id=1783
+function New-Cab {
+    [CmdletBinding()]
+    param(
+    [Parameter(Mandatory=$true)]
+    [string]$Path,
+    [Parameter(Mandatory=$true)]
+    [string]$Destination,
+    # Filter for items in $Path
+    [string]$Filter,
+    # DateTime filters
+    [DateTime]$FromDateTime,
+    [DateTime]$ToDateTime,
+    [ValidateSet('MSZIP','LZX')]
+    [string]$CompressionType = 'LZX'
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        $Path = Resolve-Path $Path
+    }
+    else {
+        Write-Error "Failed to find $Path"
+        return
+    }
+
+    if (Test-Path $Destination) {
+        $Destination = Resolve-Path -LiteralPath $Destination
+    }
+    else {
+        $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+    }
+
+    if ($PSBoundParameters.ContainsKey('Filter')) {
+        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -Filter $Filter | Where-Object {-not $_.PSIsContainer})
+    }
+    else {
+        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+    }
+
+    if ($PSBoundParameters.ContainsKey('FromDateTime')) {
+        $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+    }
+
+    if ($PSBoundParameters.ContainsKey('ToDateTime')) {
+        $files = @($files | Where-Object {$_.LastWriteTime -ge $ToDateTime})
+    }
+
+    if ($files.Count -eq 0) {
+        New-Object PSCustomObject -Property @{
+            ArchivePath = $null
+            Message = "There are no maching files in $Path"
+        }
+        return
+    }
+
+    # Create a directive file (ddf)
+    $ddfFile = Join-Path $env:TEMP $([IO.Path]::GetRandomFileName().Substring(0, 8) + ".ddf")
+    $ddfStream = [IO.File]::OpenWrite($ddfFile)
+    $ddfStream.Position = 0
+    $ddfWriter = New-Object System.IO.StreamWriter($ddfStream)
+
+    $currentDir = $Path
+    foreach ($file in $files) {
+        if ($file.DirectoryName -ne $currentDir) {
+            $subPath = $file.DirectoryName.SubString($Path.Length + 1)
+            $ddfWriter.WriteLine(".Set DestinationDir=`"$subPath`"")
+            $currentDir = $file.DirectoryName
+        }
+
+        $ddfWriter.WriteLine("`"$($file.FullName)`"")
+
+    }
+
+    if ($ddfWriter) {
+        $ddfWriter.Dispose()
+    }
+
+    $cabName = Split-Path $Path -Leaf
+    $cabFilePath = Join-Path $Destination -ChildPath "$cabName.cab"
+
+    if (Test-Path $cabFilePath) {
+        # Append a randome string to the cab file name.
+        $cabName =  $cabName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8)
+        $cabFilePath = Join-Path $Destination "$cabName.cab"
+    }
+
+    $err = $($stdout = & makecab.exe /D CompressionType=$CompressionType /D CabinetNameTemplate="$cabName.cab" /D DiskDirectoryTemplate=CDROM /D DiskDirectory1=$Destination /D MaxDiskSize=0 /D RptFileName=nul /D InfFileName=nul /F $ddfFile) 2>&1
+    Remove-Item $ddfFile -Force
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "MakeCab.exe failed; exitCode: $LASTEXITCODE; stdout:`"$stdout`"; Error: $err"
+        return
+    }
+
+    New-Object PSCustomObject -Property @{
+        ArchivePath = $cabFilePath
+        Message = $stdout
+    }
+}
+
 # Convert a local path to UNC path.
 # C:\temp --> \\myServer\C$\temp
 # These functions are meant to be just small helper and not bullet-proof.
@@ -581,7 +847,7 @@ function Save-Item {
                 Copy-Item $file.FullName -Destination $destination -Force
             }
             catch {
-                Write-Error $_
+                Write-Error -ErrorRecord $_
             }
         }
 
@@ -3218,6 +3484,9 @@ if ($SkipZip) {
 else {
     Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
     Compress-Folder -Path:$Path -ZipFileName:$zipFileName -Destination:$originalPath | Out-Null
+
+    # $compressed = Compress-Folder2 -Path $Path -Destination:$originalPath -ArchiveType 'Cab'
+    # Rename-Item -Path $compressed.ArchivePath -NewName "$zipFileName$([IO.Path]::GetExtension($compressed.CompressedFilePath))"
 
     $err = $(Remove-Item $Path -Force -Recurse) 2>&1
     if ($err) {
