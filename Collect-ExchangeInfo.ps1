@@ -130,14 +130,14 @@ param (
     [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
     [string[]]$IncludeTransportLog,
     [switch]$IncludeFastSearchLog,
-    [Nullable[DateTime]]$FromDateTime,
-    [Nullable[DateTime]]$ToDateTime,
+    [DateTime]$FromDateTime = [DateTime]::MinValue,
+    [DateTime]$ToDateTime = [DateTime]::MaxValue,
     [switch]$SkipZip,
     [switch]$SkipAutoUpdate,
     [switch]$TrustAllCertificates
 )
 
-$version = "2021-03-24"
+$version = "2021-04-04"
 #requires -Version 2.0
 
 <#
@@ -245,7 +245,7 @@ function Compress-Folder {
     $zipFilePath = Join-Path $Destination -ChildPath $zipFileName
 
     if (Test-Path $zipFilePath) {
-        # Append a randome string to the zip file name.
+        # Append a random string to the zip file name.
         $zipFileName = $zipFileNameWithouExt + "_" + [System.IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
         $zipFilePath = Join-Path $Destination -ChildPath $zipFileName
     }
@@ -451,7 +451,6 @@ function Compress-Folder {
     }
 }
 
-
 function Compress-Folder2 {
     [CmdletBinding()]
     param(
@@ -462,84 +461,112 @@ function Compress-Folder2 {
         [Parameter(Mandatory=$true)]
         [string]$Destination,
         # Filter for items in $Path
-        [string]$Filter,
+        [string[]]$Filter,
         # DateTime filters
         [DateTime]$FromDateTime,
         [DateTime]$ToDateTime,
-        [ValidateSet('Any', 'Zip', 'Cab')]
-        $ArchiveType = 'Any'
+        [ValidateSet('Zip', 'Cab')]
+        [string]$ArchiveType = 'Zip'
     )
 
-    if (Test-Path $Path) {
-        $Path = Resolve-Path -LiteralPath $Path
-    }
-    else {
-        Write-Error "$Path is not found"
-        return
-    }
+    function Get-ForwardParameter {
+        [CmdletBinding()]
+        param(
+            [string]$Command,
+            [System.Collections.IDictionary]$Parameters
+        )
 
-    if (Test-Path $Destination) {
-        $Destination = Resolve-Path -LiteralPath $Destination
-    }
-    else {
-        $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
-    }
+        $cmd = Get-Command $Command
+        $params = @{}
 
-    # Apply filters if any.
-    if ($PSBoundParameters.ContainsKey('Filter')) {
-        $files = @(Get-ChildItem -LiteralPath $Path -Filter $Filter -Recurse -Force | Where-Object {-not $_.PSIsContainer})
-    }
-    else {
-        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
-    }
-
-    if ($PSBoundParameters.ContainsKey('FromDateTime')) {
-        $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
-    }
-
-    if ($PSBoundParameters.ContainsKey('ToDateTime')) {
-        $files = @($files | Where-Object {$_.LastWriteTime -ge $ToDateTime})
-    }
-
-    # If there are no files after filters are applied, bail.
-    if ($files.Count -eq 0) {
-        New-Object PSCustomObject -Property @{
-            ArchivePath = $null
+        foreach ($p in $Parameters.GetEnumerator()) {
+            if ($cmd.Parameters.ContainsKey($p.Key) -and
+                # Filter out null for ValueType parameters
+                -not ($cmd.Parameters[$p.key].ParameterType.IsValueType -and $null -eq $p.Value)) {
+                $params.Add($p.Key, $p.Value)
+            }
         }
-        return
+
+        $params
     }
 
-    # Check if .NET Framework's compression is avaiable.
-    $zipArchiveAvailable = $false
-    try {
-        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
-        $zipArchiveAvailable = $true
-    }
-    catch {
-        Write-Verbose "System.IO.Compression wasn't found."
-    }
+    <#
+    .SYNOPSIS
+        Create a Zip file using .NET's System.IO.Compression.
+    #>
+    function New-Zip {
+        [CmdletBinding()]
+        param(
+            # Folder path to compress
+            [Parameter(Mandatory=$true)]
+            [string]$Path,
+            # Destination folder path
+            [Parameter(Mandatory=$true)]
+            [string]$Destination,
+            # Filter for items in $Path
+            [string[]]$Filter,
+            # DateTime filters
+            [DateTime]$FromDateTime,
+            [DateTime]$ToDateTime
+        )
 
-    # Check if makecab.exe is available.
-    $cabArchiveAvailable = $false
-    if ($makeCab = Get-Command 'makecab.exe' -ErrorAction SilentlyContinue) {
-        $cabArchiveAvailable = $true
-    }
-    
-    if (-not 
-        (($ArchiveType -eq 'Any' -and ($zipArchiveAvailable -or $cabArchiveAvailable) -or 
-        ($ArchiveType -eq 'Zip' -and $zipArchiveAvailable) -or 
-        ($ArchiveType -eq 'Cab' -and $cabArchiveAvailable)))) {
-            Write-Error "Requested archive type '$ArchiveType' is not available."
+        if (Test-Path $Path) {
+            $Path = Resolve-Path -LiteralPath $Path
+        }
+        else {
+            Write-Error "$Path is not found"
             return
         }
 
-    if ($zipArchiveAvailable -and $ArchiveType -ne 'Cab') {
+        if (-not (Get-Item $Path).PSIsContainer) {
+            Write-Error "$Path is not a container"
+            return
+        }
+
+        if (Test-Path $Destination) {
+            $Destination = Resolve-Path -LiteralPath $Destination
+        }
+        else {
+            $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+        }
+
+        # Apply filters if any.
+        if ($Filter.Count) {
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+        }
+        else {
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+        }
+
+        if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
+            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+        }
+
+        if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne ([DateTime]::MaxValue)) {
+            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+        }
+
+        # If there are no files after filters are applied, bail.
+        if ($files.Count -eq 0) {
+            Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            return
+        }
+
+        # Check if .NET Framework's compression is avaiable.
+        try {
+            Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+        }
+        catch {
+            Write-Error -Message "System.IO.Compression is not available. $_" -Exception $_.Exception
+            return
+        }
+
         # Create a ZIP file
         $zipFileName = Split-Path $Path -Leaf
         $zipFilePath = Join-Path $Destination -ChildPath "$zipFileName.zip"
 
         if (Test-Path $zipFilePath) {
-            # Append a randome string to the zip file name.
+            # Append a random string to the zip file name.
             $zipFileName =  $zipFileName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
             $zipFilePath = Join-Path $Destination $zipFileName
         }
@@ -563,7 +590,7 @@ function Compress-Folder2 {
                 $fileStream = $zipEntryStream = $null
                 try {
                     $fileStream = New-Object System.IO.FileStream -ArgumentList $file.FullName, ([IO.FileMode]::Open), ([IO.FileAccess]::Read), ([IO.FileShare]::ReadWrite)
-                    $zipEntry = $zipArchive.CreateEntry($file.FullName.Substring($Path.Length + 1))
+                    $zipEntry = $zipArchive.CreateEntry($file.FullName.Substring($Path.TrimEnd('\').Length + 1))
                     $zipEntryStream = $zipEntry.Open()
                     $fileStream.CopyTo($zipEntryStream)
 
@@ -596,124 +623,358 @@ function Compress-Folder2 {
             $archivePath = $zipFilePath
         }
 
+        New-Object PSCustomObject -Property @{
+            ArchivePath = $archivePath
+        }
     }
-    else {
-        $newCab = Get-Command New-Cab
-        $params = @{}
-        foreach ($p in $PSBoundParameters.GetEnumerator()) {
-            if ($newCab.Parameters.ContainsKey($p.Key)) {
-                $params.Add($p.Key, $p.Value)
+
+    <#
+    .SYNOPSIS
+        Create a Zip file using Shell.Application COM
+    #>
+    function New-ZipShell {
+        [CmdletBinding()]
+        param(
+            # Folder path to compress
+            [Parameter(Mandatory=$true)]
+            [string]$Path,
+            # Destination folder path
+            [Parameter(Mandatory=$true)]
+            [string]$Destination,
+            # Filter for items in $Path
+            [string[]]$Filter,
+            # DateTime filters
+            [DateTime]$FromDateTime,
+            [DateTime]$ToDateTime
+        )
+
+        if (Test-Path $Path) {
+            $Path = Resolve-Path -LiteralPath $Path
+        }
+        else {
+            Write-Error "$Path is not found"
+            return
+        }
+
+        if (-not (Get-Item $Path).PSIsContainer) {
+            Write-Error "$Path is not a container"
+            return
+        }
+
+        if (Test-Path $Destination) {
+            $Destination = Resolve-Path -LiteralPath $Destination
+        }
+        else {
+            $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+        }
+
+        # If there are no filters to apply, archive the give Path.
+        # Otherwise, apply filters and copy the filtered files to a temporary path and archive it.
+        if (-not $PSBoundParameters.ContainsKey('Filter') -and -not $PSBoundParameters.ContainsKey('FromDateTime') -and -not $PSBoundParameters.ContainsKey('ToDateTime')) {
+            $targetPath = $Path
+        }
+        else {
+            # Apply filters.
+            if ($Filter.Count) {
+                $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+            }
+            else {
+                $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+            }
+
+            if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
+                $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+            }
+
+            if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
+                $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+            }
+
+            # If there are no files after filters are applied, bail.
+            if ($files.Count -eq 0) {
+                Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+                return
+            }
+
+            # Copy filtered files to a temporary folder
+            $tempPath = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName().Substring(0,8))
+            New-Item $tempPath -ItemType Directory | Out-Null
+
+            foreach ($file in $files) {
+                $dest = $tempPath
+                $subPath = $file.DirectoryName.SubString($Path.Length)
+                if ($subPath) {
+                    $dest = Join-Path $tempPath $subPath
+                    if (-not (Test-Path -LiteralPath $dest)) {
+                        New-Item -ItemType Directory -Path $dest | Out-Null
+                    }
+                }
+
+                try {
+                    Copy-Item -LiteralPath $file.FullName -Destination $dest
+                }
+                catch {
+                    Write-Error -Message "Failed to copy $($file.FullName) to a temporary path $dest. $_" -Exception $_.Exception
+                }
+            }
+
+            $dest = $null
+            $targetPath = $tempPath
+        }
+
+        Write-Verbose "targetPath: $targetPath"
+
+        # Form the zip file name
+        $archiveName = Split-Path $Path -Leaf
+        $archivePath = Join-Path $Destination -ChildPath "$archiveName.zip"
+
+        if (Test-Path $archivePath) {
+            # Append a random string to the zip file name.
+            $archiveName =  $archiveName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
+            $archivePath = Join-Path $Destination $archiveName
+        }
+
+        # Use Shell.Application COM.
+        # Create a Zip file manually
+        $shellApp = New-Object -ComObject Shell.Application
+        Set-Content $archivePath ("PK" + [char]5 + [char]6 + ("$([char]0)" * 18))
+        (Get-Item $archivePath).IsReadOnly = $false
+        $zipFile = $shellApp.NameSpace($archivePath)
+
+        $zipFile.CopyHere($targetPath)
+
+        # Now wait and poll
+        $delayMs = 200
+        $inProgress = $true
+        [System.IO.FileStream]$fileStream = $null
+        #Start-Sleep -Milliseconds 3000
+
+        while ($inProgress) {
+            Start-Sleep -Milliseconds $delayMs
+
+            $fileStream = $null
+
+            try {
+                $fileStream = [IO.File]::Open($archivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+                $inProgress = $false
+            }
+            catch {
+                # ignore
+            }
+            finally {
+                if ($fileStream) {
+                    $fileStream.Dispose()
+                }
             }
         }
 
-        $cab = New-Cab @params
-        $archivePath = $cab.ArchivePath
-    }
+        if ($tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -Recurse
+        }
 
-    New-Object PSCustomObject -Property @{
-        ArchivePath = $archivePath
-    }
-}
+        <#
+        # CopyHere is not suited for item-by-item copy: Slow and prone to timing issue.
+        # Thus not used here.
 
-# https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/makecab
-# https://docs.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)
-# https://ss64.org/viewtopic.php?id=1783
-function New-Cab {
-    [CmdletBinding()]
-    param(
-    [Parameter(Mandatory=$true)]
-    [string]$Path,
-    [Parameter(Mandatory=$true)]
-    [string]$Destination,
-    # Filter for items in $Path
-    [string]$Filter,
-    # DateTime filters
-    [DateTime]$FromDateTime,
-    [DateTime]$ToDateTime,
-    [ValidateSet('MSZIP','LZX')]
-    [string]$CompressionType = 'LZX'
-    )
+        $count = $progress = $prevProgress = 0
+        $progressActivity = "Creating a Zip file $archivePath"
 
-    if (Test-Path -LiteralPath $Path) {
-        $Path = Resolve-Path $Path
-    }
-    else {
-        Write-Error "Failed to find $Path"
-        return
-    }
+        foreach ($file in $files) {
+            $progress = 100 * $count / $files.Count
+            if ($progress -ge $prevProgress + 10) {
+                Write-Progress -Activity $progressActivity -Status "$count/$($files.count) files" -PercentComplete $progress
+                $prevProgress = $progress
+            }
 
-    if (Test-Path $Destination) {
-        $Destination = Resolve-Path -LiteralPath $Destination
-    }
-    else {
-        $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
-    }
+            $zipFile.CopyHere($file.FullName)
 
-    if ($PSBoundParameters.ContainsKey('Filter')) {
-        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -Filter $Filter | Where-Object {-not $_.PSIsContainer})
-    }
-    else {
-        $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
-    }
+            # Now wait and poll
+            $inProgress = $true
+            [System.IO.FileStream]$fileStream = $null
+            $sleepCount = 1
 
-    if ($PSBoundParameters.ContainsKey('FromDateTime')) {
-        $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
-    }
+            while ($inProgress) {
+                #write-host "sleeping $([Math]::Min($delayMs * $sleepCount++, 200))"
+                Start-Sleep -Milliseconds $([Math]::Min($delayMs * $sleepCount++, 200))
 
-    if ($PSBoundParameters.ContainsKey('ToDateTime')) {
-        $files = @($files | Where-Object {$_.LastWriteTime -ge $ToDateTime})
-    }
+                $fileStream = $null
 
-    if ($files.Count -eq 0) {
+                try {
+                    $fileStream = [IO.File]::Open($archivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+                    $inProgress = $false
+                }
+                catch {
+                    # ignore
+                }
+                finally {
+                    if ($fileStream) {
+                        $fileStream.Dispose()
+                    }
+                }
+            }
+
+            $count++
+        }
+
+        Write-Progress -Activity $progressActivity -Status "Done" -Completed
+        #>
+
+        [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shellApp) | Out-Null
+
         New-Object PSCustomObject -Property @{
-            ArchivePath = $null
-            Message = "There are no maching files in $Path"
+            ArchivePath = $archivePath
         }
-        return
     }
 
-    # Create a directive file (ddf)
-    $ddfFile = Join-Path $env:TEMP $([IO.Path]::GetRandomFileName().Substring(0, 8) + ".ddf")
-    $ddfStream = [IO.File]::OpenWrite($ddfFile)
-    $ddfStream.Position = 0
-    $ddfWriter = New-Object System.IO.StreamWriter($ddfStream)
+    # https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/makecab
+    # https://docs.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)
+    function New-Cab {
+        [CmdletBinding()]
+        param(
+            # Folder path to compress
+            [Parameter(Mandatory=$true)]
+            [string]$Path,
+            # Destination folder path
+            [Parameter(Mandatory=$true)]
+            [string]$Destination,
+            # Filter for items in $Path
+            [string[]]$Filter,
+            # DateTime filters
+            [DateTime]$FromDateTime,
+            [DateTime]$ToDateTime,
+            [ValidateSet('MSZIP','LZX')]
+            [string]$CompressionType = 'LZX'
+        )
 
-    $currentDir = $Path
-    foreach ($file in $files) {
-        if ($file.DirectoryName -ne $currentDir) {
-            $subPath = $file.DirectoryName.SubString($Path.Length + 1)
-            $ddfWriter.WriteLine(".Set DestinationDir=`"$subPath`"")
-            $currentDir = $file.DirectoryName
+        if (Test-Path -LiteralPath $Path) {
+            $Path = Resolve-Path $Path
+        }
+        else {
+            Write-Error "Failed to find $Path"
+            return
         }
 
-        $ddfWriter.WriteLine("`"$($file.FullName)`"")
+        if (-not (Get-Item $Path).PSIsContainer) {
+            Write-Error "$Path is not a container"
+            return
+        }
 
+        if (Test-Path $Destination) {
+            $Destination = Resolve-Path -LiteralPath $Destination
+        }
+        else {
+            $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+        }
+
+        if ($Filter.Count) {
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+        }
+        else {
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+        }
+
+        if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
+            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+        }
+
+        if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
+            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+        }
+
+        if ($files.Count -eq 0) {
+            Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            return
+        }
+
+        # Create a directive file (ddf)
+        $ddfFile = Join-Path $env:TEMP $([IO.Path]::GetRandomFileName().Substring(0, 8) + ".ddf")
+        $ddfStream = [IO.File]::OpenWrite($ddfFile)
+        $ddfStream.Position = 0
+        $ddfWriter = New-Object System.IO.StreamWriter($ddfStream)
+        $ddfWrittenCount = 0
+        $currentDir = $Path
+
+        foreach ($file in $files) {
+            # Make sure the file not locked by another process. Otherwise makecab would fail.
+            $skip = $false
+            try {
+                $fileStream = [IO.File]::OpenRead($file.FullName)
+            }
+            catch {
+                $skip = $true
+            }
+            finally {
+                if ($fileStream) {
+                    $fileStream.Dispose()
+                }
+            }
+
+            if ($skip) {
+                continue
+            }
+
+            if ($file.DirectoryName -ne $currentDir) {
+                
+                $subPath = $file.DirectoryName.SubString($Path.TrimEnd('\').Length + 1)
+                $ddfWriter.WriteLine(".Set DestinationDir=`"$subPath`"")
+                $currentDir = $file.DirectoryName
+            }
+
+            $ddfWriter.WriteLine("`"$($file.FullName)`"")
+            $ddfWrittenCount++
+        }
+
+        if ($ddfWriter) {
+            $ddfWriter.Dispose()
+        }
+
+        # There are no files to archive. This is not necessarily an error, but write as an error for the caller.
+        if ($ddfWrittenCount -eq 0) {
+            Write-Error -Message "There are $($files.Count) files in $Path, but none can be opened."
+            return
+        }
+
+        $cabName = Split-Path $Path -Leaf
+        $cabFilePath = Join-Path $Destination -ChildPath "$cabName.cab"
+
+        if (Test-Path $cabFilePath) {
+            # Append a random string to the cab file name.
+            $cabName =  $cabName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8)
+            $cabFilePath = Join-Path $Destination "$cabName.cab"
+        }
+
+        $err = $($stdout = & makecab.exe /D CompressionType=$CompressionType /D CabinetNameTemplate="$cabName.cab" /D DiskDirectoryTemplate=CDROM /D DiskDirectory1=$Destination /D MaxDiskSize=0 /D RptFileName=nul /D InfFileName=nul /F $ddfFile) 2>&1
+        Remove-Item $ddfFile -Force
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "MakeCab.exe failed; exitCode: $LASTEXITCODE; stdout:`"$stdout`"; Error: $err"
+            return
+        }
+
+        New-Object PSCustomObject -Property @{
+            ArchivePath = $cabFilePath
+            # Message = $stdout
+        }
     }
 
-    if ($ddfWriter) {
-        $ddfWriter.Dispose()
-    }
-
-    $cabName = Split-Path $Path -Leaf
-    $cabFilePath = Join-Path $Destination -ChildPath "$cabName.cab"
-
-    if (Test-Path $cabFilePath) {
-        # Append a randome string to the cab file name.
-        $cabName =  $cabName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8)
-        $cabFilePath = Join-Path $Destination "$cabName.cab"
-    }
-
-    $err = $($stdout = & makecab.exe /D CompressionType=$CompressionType /D CabinetNameTemplate="$cabName.cab" /D DiskDirectoryTemplate=CDROM /D DiskDirectory1=$Destination /D MaxDiskSize=0 /D RptFileName=nul /D InfFileName=nul /F $ddfFile) 2>&1
-    Remove-Item $ddfFile -Force
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "MakeCab.exe failed; exitCode: $LASTEXITCODE; stdout:`"$stdout`"; Error: $err"
-        return
-    }
-
-    New-Object PSCustomObject -Property @{
-        ArchivePath = $cabFilePath
-        Message = $stdout
+    # Here's main body of Compress-Folder2
+    switch ($ArchiveType) {
+        'Zip' {
+            if ($PSVersionTable.PSVersion.Major -gt 2) {
+                $params = Get-ForwardParameter -Command 'New-Zip' -Parameters $PSBoundParameters
+                New-Zip @params
+            }
+            else {
+                $params = Get-ForwardParameter -Command 'New-ZipShell' -Parameters $PSBoundParameters
+                New-ZipShell @params
+            }
+            break
+        }
+        'Cab' {
+            $params = Get-ForwardParameter -Command 'New-Cab' -Parameters $PSBoundParameters
+            New-Cab @params
+            break
+        }
     }
 }
 
@@ -753,13 +1014,13 @@ function ConvertFrom-UNCPath {
     }
 }
 
-function Save-Item {
+function Save-Item_old {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$SourcePath, # Path to save
         [Parameter(Mandatory = $true)]
-        $DestitionPath, # Where to save
+        $DestinationPath, # Where to save
         $Filter = '*', # filter works only when copied without zipping first.
         $ZipFileName,
         [DateTime]$FromDateTime,
@@ -771,10 +1032,10 @@ function Save-Item {
         throw "$SourcePath is not found"
     }
 
-    if (-not (Test-Path $DestitionPath)) {
-        New-Item $DestitionPath -ItemType Directory -ErrorAction Stop | Out-Null
+    if (-not (Test-Path $DestinationPath)) {
+        New-Item $DestinationPath -ItemType Directory -ErrorAction Stop | Out-Null
     }
-    $DestitionPath = Resolve-Path $DestitionPath
+    $DestinationPath = Resolve-Path $DestinationPath
 
     $serverAndPath = ConvertFrom-UNCPath $SourcePath
     $server = $serverAndPath.Server
@@ -822,7 +1083,7 @@ function Save-Item {
     if ($zipCreated) {
         Write-Progress -Activity "Copying a zip file from $server" -Status "Started (This might take a while)" -PercentComplete -1
         $uncZipFile = ConvertTo-UNCPath $zipResult.ZipFilePath -Server $server
-        Move-Item $uncZipFile -Destination $DestitionPath
+        Move-Item $uncZipFile -Destination $DestinationPath
         Write-Progress -Activity  "Copying a zip file from $server" -Status "Done" -Completed
     }
     else {
@@ -838,7 +1099,7 @@ function Save-Item {
         }
 
         foreach ($file in $files) {
-            $destination = Join-Path $DestitionPath $file.DirectoryName.SubString($SourcePath.Length)
+            $destination = Join-Path $DestinationPath $file.DirectoryName.SubString($SourcePath.Length)
             if (-not (Test-Path $destination)) {
                 New-Item $destination -ItemType Directory | Out-Null
             }
@@ -853,6 +1114,118 @@ function Save-Item {
 
         if ($files.Count -eq 0) {
             Write-Log "[$($MyInvocation.MyCommand)] There're no files in $SourcePath from $FromDateTime to $ToDateTime"
+        }
+    }
+}
+
+function Save-Item {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [Alias("SourcePath")]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [Alias("DestinationPath")]
+        [string]$Destination,
+        [string[]]$Filter,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime,
+        [ValidateSet('Zip', 'Cab')]
+        [string]$ArchiveType,
+        [switch]$ShowProgress
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Error "Path "$Path" is not found."
+        return
+    }
+
+    if (Test-Path $Destination) {
+        $Destination = Resolve-Path -LiteralPath $Destination
+    }
+    else {
+        $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
+    }
+
+    $serverAndPath = ConvertFrom-UNCPath $Path.ToString()
+    $server = $serverAndPath.Server
+    $localPath = $serverAndPath.LocalPath
+
+    # When saving local files, no need to compress
+    $needCompress = $true
+    if (-not $server -or $server -eq $env:COMPUTERNAME) {
+        $needCompress = $false
+    }
+
+    # Make sure that the remote server's Windows TEMP (will be used as archive destination) is accessible.
+    $winTempPath = Get-WindowsTempFolder -Server $server
+    if (-not (Test-Path -LiteralPath (ConvertTo-UNCPath -Server $server -Path $winTempPath))) {
+        $needCompress = $false
+    }
+
+    if ($needCompress) {
+        # Try to compress on the remote server first.
+        $compressArgs = @{
+            Path = $localPath
+            Destination = $winTempPath
+        }
+
+        @('Filter', 'FromDateTime', 'ToDateTime', 'ArchiveType') | ForEach-Object {
+            if ($PSBoundParameters.ContainsKey($_)) {
+                $compressArgs.Add($_, $PSBoundParameters[$_])
+            }
+        }
+
+        $archive = Invoke-Command -ComputerName $server -ScriptBlock {
+            param($compress, $compressArgs, $showProgress)
+            if (-not $showProgress) {
+                $ProgressPreference = 'SilentlyContinue'
+            }
+            & ([ScriptBlock]::Create($compress)) @compressArgs
+        } -ArgumentList ${function:Compress-Folder2}, $compressArgs, $ShowProgress
+    }
+
+    if ($archive.ArchivePath) {
+        # An archive was successfully created. Move it to Destination
+        $uncArchivePath = ConvertTo-UNCPath -Path $archive.ArchivePath -Server $server
+        Move-Item $uncArchivePath -Destination $Destination
+    }
+    else {
+        # Failed or skipped to create an archive. Manually copy.
+
+        # Apply filters if any.
+        if ($Filter.Count) {
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+        }
+        else {
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+        }
+
+        if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
+            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+        }
+
+        if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
+            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+        }
+
+        if ($files.Count -eq 0) {
+            Write-Error -Message "There are no files in $Path after applying filters. Filter: $Filter; from: $FromDateDateTime; to: $ToDateTime"
+            return
+        }
+
+        foreach ($file in $files) {
+            $dest = Join-Path $Destination $file.DirectoryName.SubString($Path.TrimEnd('\').Length)
+            if (-not (Test-Path $dest)) {
+                New-Item $dest -ItemType Directory | Out-Null
+            }
+
+            try {
+                Copy-Item $file.FullName -Destination $dest -Force
+            }
+            catch {
+                Write-Error -ErrorRecord $_
+            }
         }
     }
 }
@@ -915,7 +1288,7 @@ function Save-IISLog {
             $destination = Join-Path $Path -ChildPath "$Server\$folderName"
 
             $uncPath = ConvertTo-UNCPath $webSiteGroup.Group[0].Directory -Server $Server
-            Save-Item -SourcePath $uncPath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -SourcePath $uncPath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
     else {
@@ -924,7 +1297,7 @@ function Save-IISLog {
         $uncPath = ConvertTo-UNCPath 'C:\inetpub\logs\LogFiles' -Server $Server
         if (Test-Path $uncPath) {
             $destination = Join-Path $Path -ChildPath $Server
-            Save-Item -SourcePath $uncPath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -SourcePath $uncPath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
         else {
             # Give up
@@ -951,7 +1324,7 @@ function Save-HttpErr {
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-Path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 <#
@@ -1001,7 +1374,7 @@ function Save-ExchangeLogging {
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 function Save-TransportLog {
@@ -1064,12 +1437,12 @@ function Save-TransportLog {
         }
         $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
         $destination = Join-Path $Path "$logType\$Server\Hub"
-        Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+        Save-Item -SourcePath $sourcePath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 
         if ($frontendTransport -and $frontendTransport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
             $destination = Join-Path $Path "$logType\$Server\FrontEnd"
-            Save-Item -SourcePath $sourcePath -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -SourcePath $sourcePath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
 }
@@ -1107,7 +1480,7 @@ function Save-ExchangeSetupLog {
 
     $source = ConvertTo-UNCPath 'C:\ExchangeSetupLogs' -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestitionPath $destination
+    Save-Item -SourcePath $source -DestinationPath $destination
 }
 
 function Save-FastSearchLog {
@@ -1124,7 +1497,7 @@ function Save-FastSearchLog {
     $exsetupPath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     $source = ConvertTo-UNCPath $([IO.Path]::Combine($exsetupPath, 'Bin\Search\Ceres\Diagnostics\Logs')) -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestitionPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 <#
@@ -2029,7 +2402,7 @@ function Save-ExchangeEventLog {
         wevtutil al $localFilePath /r:$Server
     }
 
-    Save-Item -SourcePath $uncWinTempEventPath -DestitionPath $destination
+    Save-Item -SourcePath $uncWinTempEventPath -DestinationPath $destination
     Remove-Item $uncWinTempEventPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -2743,11 +3116,15 @@ function Save-AppConfig {
         $Server
     )
 
-    $exServer = Get-ExchangeServer $Server
-    if (-not $exServer.IsHubTransportServer) {
-        Write-Log "Skipping $Server because this is not a HubTransportServer."
-        return
+    $exServer = $Script:allExchangeServers | Where-Object {$_.Name -eq $Server}
+    if (-not $exServer) {
+        $exServer = Get-ExchangeServer $Server
     }
+
+    # if (-not $exServer.IsHubTransportServer) {
+    #     Write-Log "Skipping $Server because this is not a HubTransportServer."
+    #     return
+    # }
 
     $Folder = Join-Path $Path $Server
     if (-not (Test-Path $Folder)) {
@@ -2755,15 +3132,19 @@ function Save-AppConfig {
     }
 
     $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
-    $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
-    $binFolderUNC = ConvertTo-UNCPath -Server $Server -Path $binFolder
+    $uncExchangePath = ConvertTo-UNCPath -Server $Server -Path $exchangePath
+    Save-Item -SourcePath $uncExchangePath -DestinationPath $Folder -Filter '*.exe.config', 'web.config'
 
-    Save-Item -SourcePath $binFolderUNC -DestitionPath $Folder -Filter '*.exe.config' -SkipZip
+    # $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
+    # $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
+    # $binFolderUNC = ConvertTo-UNCPath -Server $Server -Path $binFolder
+
+    # Save-Item -SourcePath $binFolderUNC -DestinationPath $Folder -Filter '*.exe.config' # -SkipZip
 
     # For now, web config files are not included.
     # $casFolder = [IO.Path]::Combine($exchangePath, 'ClientAccess')
     # $casFolderUNC = ConvertTo-UNCPath -Server $Server -Path $casFolder
-    # Save-Item -SourcePath $casFolderUNC -DestitionPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
+    # Save-Item -SourcePath $casFolderUNC -DestinationPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
 }
 
 function Get-InstalledUpdate
@@ -2997,21 +3378,12 @@ if (-not $SkipAutoUpdate) {
     }
 }
 
-if (-not $FromDateTime) {
-    $FromDateTime = [DateTime]::MinValue
-}
-
-if (-not $ToDateTime) {
-    $ToDateTime = [DateTime]::MaxValue
-}
-
 if ($FromDateTime -ge $ToDateTime) {
     throw "Parameter ToDateTime ($ToDateTime) must be after FromDateTime ($FromDateTime)"
 }
 
-$cmd = Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue
-if (-not $cmd) {
-    throw "Get-OrganizationConfig is not available. Please run with Exchange Remote PowerShell session"
+if (-not (Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue)) {
+    throw "Get-OrganizationConfig is not available. Please run after importing an Exchange Remote PowerShell session"
 }
 
 $OrgConfig = Get-OrganizationConfig
@@ -3482,11 +3854,11 @@ if ($SkipZip) {
     Rename-Item -Path $Path -NewName $zipFileName
 }
 else {
-    Write-Progress -Activity $collectionActivity -Status:"Packing into a zip file" -PercentComplete:95
-    Compress-Folder -Path:$Path -ZipFileName:$zipFileName -Destination:$originalPath | Out-Null
+    Write-Progress -Activity $collectionActivity -Status:"Archiving $Path" -PercentComplete:95
+    # Compress-Folder -Path:$Path -ZipFileName:$zipFileName -Destination:$originalPath | Out-Null
 
-    # $compressed = Compress-Folder2 -Path $Path -Destination:$originalPath -ArchiveType 'Cab'
-    # Rename-Item -Path $compressed.ArchivePath -NewName "$zipFileName$([IO.Path]::GetExtension($compressed.CompressedFilePath))"
+    $archive = Compress-Folder2 -Path $Path -Destination:$originalPath -ArchiveType 'Zip'
+    Rename-Item -Path $archive.ArchivePath -NewName "$zipFileName$([IO.Path]::GetExtension($archive.ArchivePath))"
 
     $err = $(Remove-Item $Path -Force -Recurse) 2>&1
     if ($err) {
