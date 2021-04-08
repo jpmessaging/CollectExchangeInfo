@@ -134,7 +134,9 @@ param (
     [DateTime]$ToDateTime = [DateTime]::MaxValue,
     [switch]$SkipZip,
     [switch]$SkipAutoUpdate,
-    [switch]$TrustAllCertificates
+    [switch]$TrustAllCertificates,
+    [ValidateSet('Cab', 'Zip')]
+    [string]$ArchiveType = 'Zip'
 )
 
 $version = "2021-04-04"
@@ -204,6 +206,53 @@ function Save-Object {
     }
 }
 
+function Select-ForwardableParameter {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Command,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [System.Collections.IDictionary]$Parameters,
+        # Names of parameters to include in the result.
+        [string[]]$Include,
+        # Names of parameters to exclude from the result.
+        [string[]]$Exclude
+    )
+
+    begin{}
+    process {
+        if (-not ($cmd = Get-Command $Command -ErrorAction SilentlyContinue)) {
+            return Write-Error -Message "Cannot find $Command"
+        }
+
+        if ($null -eq $cmd.Parameters) {
+            return Write-Error -Message "There is no Parameters available for $Command."
+        }
+
+        $params = @{}
+
+        foreach ($p in $Parameters.GetEnumerator()) {
+            $name = $p.Key
+            $value = $p.Value
+            if ($PSBoundParameters.ContainsKey('Include') -and $Include -notcontains $name) {
+                continue
+            }
+
+            if ($PSBoundParameters.ContainsKey('Exclude') -and $Exclude -contains $name) {
+                continue
+            }
+
+            # Makes sure to filter out null for ValueType parameters
+            if ($cmd.Parameters.ContainsKey($name) -and -not ($cmd.Parameters[$name].ParameterType.IsValueType -and $null -eq $value)) {
+                $params.Add($name, $value)
+            }
+        }
+        $params
+    }
+    end{}
+}
+
+
 function Compress-Folder {
     [CmdletBinding()]
     param(
@@ -221,27 +270,6 @@ function Compress-Folder {
         [ValidateSet('Zip', 'Cab')]
         [string]$ArchiveType = 'Zip'
     )
-
-    function Get-ForwardParameter {
-        [CmdletBinding()]
-        param(
-            [string]$Command,
-            [System.Collections.IDictionary]$Parameters
-        )
-
-        $cmd = Get-Command $Command
-        $params = @{}
-
-        foreach ($p in $Parameters.GetEnumerator()) {
-            if ($cmd.Parameters.ContainsKey($p.Key) -and
-                # Filter out null for ValueType parameters
-                -not ($cmd.Parameters[$p.key].ParameterType.IsValueType -and $null -eq $p.Value)) {
-                $params.Add($p.Key, $p.Value)
-            }
-        }
-
-        $params
-    }
 
     <#
     .SYNOPSIS
@@ -299,9 +327,12 @@ function Compress-Folder {
             $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
         }
 
+        # Remove duplicate by Fullname
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+
         # If there are no files after filters are applied, bail.
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -443,9 +474,12 @@ function Compress-Folder {
                 $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
             }
 
+            # Remove duplicate by Fullname
+            $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+
             # If there are no files after filters are applied, bail.
             if ($files.Count -eq 0) {
-                Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+                Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
                 return
             }
 
@@ -634,8 +668,11 @@ function Compress-Folder {
             $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
         }
 
+        # Remove duplicate by Fullname
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filster are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -714,21 +751,22 @@ function Compress-Folder {
     switch ($ArchiveType) {
         'Zip' {
             if ($PSVersionTable.PSVersion.Major -gt 2) {
-                $params = Get-ForwardParameter -Command 'New-Zip' -Parameters $PSBoundParameters
-                New-Zip @params
+                $compressCmd = Get-Command 'New-Zip'
             }
             else {
-                $params = Get-ForwardParameter -Command 'New-ZipShell' -Parameters $PSBoundParameters
-                New-ZipShell @params
+                $compressCmd = Get-Command 'New-ZipShell'
             }
             break
         }
         'Cab' {
-            $params = Get-ForwardParameter -Command 'New-Cab' -Parameters $PSBoundParameters
-            New-Cab @params
+            $compressCmd = Get-Command 'New-Cab'
             break
         }
     }
+
+    $params = @{}
+    $PSBoundParameters.Keys | ForEach-Object { if ($compressCmd.Parameters.ContainsKey($_)) { $params.Add($_, $PSBoundParameters[$_])}}
+    & $compressCmd @params
 }
 
 # Convert a local path to UNC path.
@@ -777,8 +815,9 @@ function Save-Item {
         [Alias("DestinationPath")]
         [string]$Destination,
         [string[]]$Filter,
-        [DateTime]$FromDateTime,
-        [DateTime]$ToDateTime,
+        # DateTime filters are Nullable here so that caller can "forward" these easily.
+        [Nullable[DateTime]]$FromDateTime,
+        [Nullable[DateTime]]$ToDateTime,
         [ValidateSet('Zip', 'Cab')]
         [string]$ArchiveType,
         [switch]$ShowProgress
@@ -814,23 +853,41 @@ function Save-Item {
 
     if ($needCompress) {
         # Try to compress on the remote server first.
-        $compressArgs = @{
-            Path = $localPath
-            Destination = $winTempPath
-        }
+        $compressArgs = Select-ForwardableParameter -Command 'Compress-Folder' -Parameters $PSBoundParameters -Exclude 'Path', 'Destination'
+        $compressArgs['Path'] = $localPath
+        $compressArgs['Destination'] = $winTempPath
 
-        @('Filter', 'FromDateTime', 'ToDateTime', 'ArchiveType') | ForEach-Object {
-            if ($PSBoundParameters.ContainsKey($_)) {
-                $compressArgs.Add($_, $PSBoundParameters[$_])
-            }
-        }
+        # $compressArgs = @{
+        #     Path = $localPath
+        #     Destination = $winTempPath
+        # }
+
+        # # Exract from PSBoundParameters with a null-check for ValueType param
+        # $compress = Get-Command Compress-Folder
+        # @('Filter', 'FromDateTime', 'ToDateTime', 'ArchiveType') | ForEach-Object {
+        #     $name = $_
+        #     $value = $PSBoundParameters[$_]
+        #     if ($PSBoundParameters.ContainsKey($name) -and -not ($compress.Parameters[$name].ParameterType.IsValueType -and $null -eq $value)) {
+        #         $compressArgs.Add($name, $value)
+        #     }
+        # }
+
+        # $archive = Invoke-Command -ComputerName $server -ScriptBlock {
+        #     param($compress, $compressArgs, $showProgress)
+        #     if (-not $showProgress) {
+        #         $ProgressPreference = 'SilentlyContinue'
+        #     }
+        #     & ([ScriptBlock]::Create($compress)) @compressArgs
+        # } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
 
         $archive = Invoke-Command -ComputerName $server -ScriptBlock {
             param($compress, $compressArgs, $showProgress)
             if (-not $showProgress) {
                 $ProgressPreference = 'SilentlyContinue'
             }
-            & ([ScriptBlock]::Create($compress)) @compressArgs
+            . ([ScriptBlock]::Create("function Compress-Folder {$compress}"))
+            Compress-Folder @compressArgs
+
         } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
     }
 
@@ -867,6 +924,8 @@ function Save-Item {
         if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
             $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
         }
+
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
 
         if ($files.Count -eq 0) {
             Write-Error -Message "There are no files in $Path after applying filters. Filter: $Filter; from: $FromDateDateTime; to: $ToDateTime"
@@ -947,7 +1006,7 @@ function Save-IISLog {
             $destination = Join-Path $Path -ChildPath "$Server\$folderName"
 
             $uncPath = ConvertTo-UNCPath $webSiteGroup.Group[0].Directory -Server $Server
-            Save-Item -SourcePath $uncPath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -Path $uncPath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
     else {
@@ -956,7 +1015,7 @@ function Save-IISLog {
         $uncPath = ConvertTo-UNCPath 'C:\inetpub\logs\LogFiles' -Server $Server
         if (Test-Path $uncPath) {
             $destination = Join-Path $Path -ChildPath $Server
-            Save-Item -SourcePath $uncPath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -Path $uncPath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
         else {
             # Give up
@@ -983,7 +1042,7 @@ function Save-HttpErr {
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-Path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -Path $source -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 <#
@@ -1033,7 +1092,7 @@ function Save-ExchangeLogging {
 
     $source = ConvertTo-UNCPath $logPath -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -Path $source -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 function Save-TransportLog {
@@ -1096,12 +1155,12 @@ function Save-TransportLog {
         }
         $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
         $destination = Join-Path $Path "$logType\$Server\Hub"
-        Save-Item -SourcePath $sourcePath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+        Save-Item -Path $sourcePath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 
         if ($frontendTransport -and $frontendTransport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
             $destination = Join-Path $Path "$logType\$Server\FrontEnd"
-            Save-Item -SourcePath $sourcePath -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+            Save-Item -Path $sourcePath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
     }
 }
@@ -1139,7 +1198,7 @@ function Save-ExchangeSetupLog {
 
     $source = ConvertTo-UNCPath 'C:\ExchangeSetupLogs' -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestinationPath $destination
+    Save-Item -Path $source -Destination $destination
 }
 
 function Save-FastSearchLog {
@@ -1156,7 +1215,7 @@ function Save-FastSearchLog {
     $exsetupPath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     $source = ConvertTo-UNCPath $([IO.Path]::Combine($exsetupPath, 'Bin\Search\Ceres\Diagnostics\Logs')) -Server $Server
     $destination = Join-path $Path -ChildPath $Server
-    Save-Item -SourcePath $source -DestinationPath $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    Save-Item -Path $source -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
 <#
@@ -2061,7 +2120,7 @@ function Save-ExchangeEventLog {
         wevtutil al $localFilePath /r:$Server
     }
 
-    Save-Item -SourcePath $uncWinTempEventPath -DestinationPath $destination
+    Save-Item -Path $uncWinTempEventPath -Destination $destination
     Remove-Item $uncWinTempEventPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -2792,7 +2851,7 @@ function Save-AppConfig {
 
     $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     $uncExchangePath = ConvertTo-UNCPath -Server $Server -Path $exchangePath
-    Save-Item -SourcePath $uncExchangePath -DestinationPath $Folder -Filter '*.exe.config', 'web.config'
+    Save-Item -Path $uncExchangePath -Destination $Folder -Filter '*.exe.config', 'web.config'
 
     # $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     # $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
@@ -3153,6 +3212,9 @@ foreach ($server in $allExchangeServers) {
         $server.IsDirectAccess = $true
     }
 }
+
+# Configure default parameters
+$PSDefaultParameterValues['Save-Item:ArchiveType'] = $ArchiveType
 
 # Save errors for troubleshooting purpose
 # $errs = New-Object System.Collections.Generic.List[object]
@@ -3515,7 +3577,7 @@ if ($SkipZip) {
 else {
     Write-Progress -Activity $collectionActivity -Status:"Archiving $Path" -PercentComplete:95
 
-    $archive = Compress-Folder -Path $Path -Destination:$originalPath -ArchiveType 'Zip'
+    $archive = Compress-Folder -Path $Path -Destination:$originalPath -ArchiveType $ArchiveType
     Rename-Item -Path $archive.ArchivePath -NewName "$zipFileName$([IO.Path]::GetExtension($archive.ArchivePath))"
 
     $err = $(Remove-Item $Path -Force -Recurse) 2>&1
