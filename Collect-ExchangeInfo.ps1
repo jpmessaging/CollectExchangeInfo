@@ -452,7 +452,7 @@ function Compress-Folder {
             $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
         }
 
-        # If there are no filters to apply, archive the give Path.
+        # If there are no filters to apply, archive the given Path.
         # Otherwise, apply filters and copy the filtered files to a temporary path and archive it.
         if (-not $PSBoundParameters.ContainsKey('Filter') -and -not $PSBoundParameters.ContainsKey('FromDateTime') -and -not $PSBoundParameters.ContainsKey('ToDateTime')) {
             $targetPath = $Path
@@ -558,53 +558,6 @@ function Compress-Folder {
         if ($tempPath) {
             Remove-Item -LiteralPath $tempPath -Force -Recurse
         }
-
-        <#
-        # CopyHere is not suited for item-by-item copy: Slow and prone to timing issue.
-        # Thus not used here.
-
-        $count = $progress = $prevProgress = 0
-        $progressActivity = "Creating a Zip file $archivePath"
-
-        foreach ($file in $files) {
-            $progress = 100 * $count / $files.Count
-            if ($progress -ge $prevProgress + 10) {
-                Write-Progress -Activity $progressActivity -Status "$count/$($files.count) files" -PercentComplete $progress
-                $prevProgress = $progress
-            }
-
-            $zipFile.CopyHere($file.FullName)
-
-            # Now wait and poll
-            $inProgress = $true
-            [System.IO.FileStream]$fileStream = $null
-            $sleepCount = 1
-
-            while ($inProgress) {
-                #write-host "sleeping $([Math]::Min($delayMs * $sleepCount++, 200))"
-                Start-Sleep -Milliseconds $([Math]::Min($delayMs * $sleepCount++, 200))
-
-                $fileStream = $null
-
-                try {
-                    $fileStream = [IO.File]::Open($archivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
-                    $inProgress = $false
-                }
-                catch {
-                    # ignore
-                }
-                finally {
-                    if ($fileStream) {
-                        $fileStream.Dispose()
-                    }
-                }
-            }
-
-            $count++
-        }
-
-        Write-Progress -Activity $progressActivity -Status "Done" -Completed
-        #>
 
         [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shellApp) | Out-Null
 
