@@ -332,7 +332,7 @@ function Compress-Folder {
 
         # If there are no files after filters are applied, bail.
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -479,7 +479,7 @@ function Compress-Folder {
 
             # If there are no files after filters are applied, bail.
             if ($files.Count -eq 0) {
-                Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+                Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
                 return
             }
 
@@ -625,7 +625,7 @@ function Compress-Folder {
         $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
 
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filsters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -810,38 +810,17 @@ function Save-Item {
         $compressArgs['Path'] = $localPath
         $compressArgs['Destination'] = $winTempPath
 
-        # $compressArgs = @{
-        #     Path = $localPath
-        #     Destination = $winTempPath
-        # }
+        $archiveError = $(
+            $archive = Invoke-Command -ComputerName $server -ScriptBlock {
+                param($compress, $compressArgs, $showProgress)
+                if (-not $showProgress) {
+                    $ProgressPreference = 'SilentlyContinue'
+                }
+                . ([ScriptBlock]::Create("function Compress-Folder {$compress}"))
+                Compress-Folder @compressArgs
 
-        # # Exract from PSBoundParameters with a null-check for ValueType param
-        # $compress = Get-Command Compress-Folder
-        # @('Filter', 'FromDateTime', 'ToDateTime', 'ArchiveType') | ForEach-Object {
-        #     $name = $_
-        #     $value = $PSBoundParameters[$_]
-        #     if ($PSBoundParameters.ContainsKey($name) -and -not ($compress.Parameters[$name].ParameterType.IsValueType -and $null -eq $value)) {
-        #         $compressArgs.Add($name, $value)
-        #     }
-        # }
-
-        # $archive = Invoke-Command -ComputerName $server -ScriptBlock {
-        #     param($compress, $compressArgs, $showProgress)
-        #     if (-not $showProgress) {
-        #         $ProgressPreference = 'SilentlyContinue'
-        #     }
-        #     & ([ScriptBlock]::Create($compress)) @compressArgs
-        # } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
-
-        $archive = Invoke-Command -ComputerName $server -ScriptBlock {
-            param($compress, $compressArgs, $showProgress)
-            if (-not $showProgress) {
-                $ProgressPreference = 'SilentlyContinue'
-            }
-            . ([ScriptBlock]::Create("function Compress-Folder {$compress}"))
-            Compress-Folder @compressArgs
-
-        } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
+            } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
+        ) 2>&1
     }
 
     if ($archive.ArchivePath) {
@@ -862,6 +841,12 @@ function Save-Item {
     else {
         # Failed or skipped to create an archive. Manually copy.
 
+        # If it failed due to no files, there's no need to filter again. So just bail after re-writing the error.
+        if ($archiveError -match 'no file') {
+            Write-Error -ErrorRecord $archiveError
+            return
+        }
+
         # Apply filters if any.
         if ($Filter.Count) {
             $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
@@ -881,7 +866,7 @@ function Save-Item {
         $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
 
         if ($files.Count -eq 0) {
-            Write-Error -Message "There are no files in $Path after applying filters. Filter: $Filter; from: $FromDateDateTime; to: $ToDateTime"
+            Write-Error -Message "There are no files in $Path after applying filters. Filter: $Filter; from: $FromDateTime; to: $ToDateTime"
             return
         }
 
@@ -3166,8 +3151,10 @@ foreach ($server in $allExchangeServers) {
     }
 }
 
-# Configure default parameters
-$PSDefaultParameterValues['Save-Item:ArchiveType'] = $ArchiveType
+# Configure default parameters. PSDefaultParameterValues is only available for PSv3 or later.
+if ($null -ne $PSDefaultParameterValues -and -not $PSDefaultParameterValues.ContainsKey('Save-Item:ArchiveType')) {
+    $PSDefaultParameterValues['Save-Item:ArchiveType'] = $ArchiveType
+}
 
 # Save errors for troubleshooting purpose
 # $errs = New-Object System.Collections.Generic.List[object]
