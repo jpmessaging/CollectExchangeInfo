@@ -332,7 +332,7 @@ function Compress-Folder {
 
         # If there are no files after filters are applied, bail.
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -479,7 +479,7 @@ function Compress-Folder {
 
             # If there are no files after filters are applied, bail.
             if ($files.Count -eq 0) {
-                Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+                Write-Error "There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
                 return
             }
 
@@ -625,7 +625,7 @@ function Compress-Folder {
         $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
 
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filters are applied. Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            Write-Error "There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
@@ -866,7 +866,7 @@ function Save-Item {
         $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
 
         if ($files.Count -eq 0) {
-            Write-Error -Message "There are no files in $Path after applying filters. Filter: $Filter; from: $FromDateTime; to: $ToDateTime"
+            Write-Error "There are no files after filters are applied. Server: $server, Path: $localPath, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
             return
         }
 
