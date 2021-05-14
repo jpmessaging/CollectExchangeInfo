@@ -139,7 +139,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-04-04"
+$version = "2021-05-14"
 #requires -Version 2.0
 
 <#
@@ -686,8 +686,10 @@ function Compress-Folder {
             $cabFilePath = Join-Path $Destination "$cabName.cab"
         }
 
+        Write-Progress -Activity "Creating a cab file" -Status "Please wait" -PercentComplete -1
         $err = $($stdout = & makecab.exe /D CompressionType=$CompressionType /D CabinetNameTemplate="$cabName.cab" /D DiskDirectoryTemplate=CDROM /D DiskDirectory1=$Destination /D MaxDiskSize=0 /D RptFileName=nul /D InfFileName=nul /F $ddfFile) 2>&1
         Remove-Item $ddfFile -Force
+        Write-Progress -Activity "Creating a cab file" -Status "Done" -Completed
 
         if ($LASTEXITCODE -ne 0) {
             Write-Error "MakeCab.exe failed; exitCode: $LASTEXITCODE; stdout:`"$stdout`"; Error: $err"
@@ -816,9 +818,8 @@ function Save-Item {
                 if (-not $showProgress) {
                     $ProgressPreference = 'SilentlyContinue'
                 }
-                . ([ScriptBlock]::Create("function Compress-Folder {$compress}"))
-                Compress-Folder @compressArgs
 
+                & $compress @compressArgs
             } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
         ) 2>&1
     }
@@ -1055,11 +1056,6 @@ function Save-TransportLog {
         $transport = Get-TransportServer $Server -ErrorAction SilentlyContinue
     }
 
-    # If both Get-TransportService & Get-TransportServer are not available, bail.
-    if (-not $transport) {
-        throw "Get-TransportService/TransportServer is not available."
-    }
-
     $frontendTransport = $null
     if (Get-Command 'Get-FrontendTransportService' -ErrorAction SilentlyContinue) {
         $frontendTransport = Get-FrontendTransportService $Server -ErrorAction SilentlyContinue
@@ -1087,13 +1083,12 @@ function Save-TransportLog {
     foreach ($logType in $Type) {
         # Parameter name is ***LogPath
         $paramName = $logType + 'LogPath'
-        if (-not $transport.$paramName) {
-            Write-Error "Cannot find $paramName in the result of Get-TransportService"
-            continue
+
+        if ($transport -and $transport.$paramName) {
+            $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
+            $destination = Join-Path $Path "$logType\$Server\Hub"
+            Save-Item -Path $sourcePath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
-        $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
-        $destination = Join-Path $Path "$logType\$Server\Hub"
-        Save-Item -Path $sourcePath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 
         if ($frontendTransport -and $frontendTransport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $frontendTransport.$paramName.ToString() -Server $Server
