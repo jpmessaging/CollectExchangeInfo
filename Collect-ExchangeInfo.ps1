@@ -1086,7 +1086,12 @@ function Save-TransportLog {
 
         if ($transport -and $transport.$paramName) {
             $sourcePath = ConvertTo-UNCPath $transport.$paramName.ToString() -Server $Server
-            $destination = Join-Path $Path "$logType\$Server\Hub"
+            if ($transport.$paramName.ToString() -match 'Edge') {
+                $destination = Join-Path $Path "$logType\$Server\Edge"
+            }
+            else {
+                $destination = Join-Path $Path "$logType\$Server\Hub"
+            }
             Save-Item -Path $sourcePath -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
         }
 
