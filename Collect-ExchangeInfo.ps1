@@ -79,6 +79,10 @@ This is a best-effort and any failure won't stop the script's execution.
 Switch to suppress certificate check when accessing a remote web server. This is for the aforementioned auto update.
 This script does not access any external web site other than its GitHub repository.
 
+.PARAMETER ArchiveType
+Specify the archive type. Valid values are 'Cab' and 'Zip' and the default is 'Zip'.
+Cab is slower but it generates a smaller archive file (i.e. higher compression ratio).
+
 .EXAMPLE
 .\Collect-ExchangeInfo -Path .\exinfo -Servers:*
 
@@ -3008,6 +3012,8 @@ if ($TrustAllCertificates) {
         Add-Type $TrustAllCertificatePolicyDefinition
     }
 
+    # ToDo: Maybe replace with ServicePointManager.ServerCertificateValidationCallback in future.
+    # [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
     [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
 }
 
