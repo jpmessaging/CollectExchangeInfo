@@ -120,7 +120,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 #>
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$Path,
     [string[]]$Parameters = @(),
     [string[]]$Servers = @(),
@@ -131,7 +131,7 @@ param (
     [switch]$IncludePerformanceLog,
     [switch]$IncludeIISLog,
     [string[]]$IncludeExchangeLog,
-    [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
+    [ValidateSet('Connectivity', 'MessageTracking', 'SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
     [string[]]$IncludeTransportLog,
     [switch]$IncludeFastSearchLog,
     [DateTime]$FromDateTime = [DateTime]::MinValue,
@@ -153,7 +153,7 @@ function Save-Object {
     [CmdletBinding()]
     Param(
         #[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
-        [Parameter(ValueFromPipeline=$true)]
+        [Parameter(ValueFromPipeline = $true)]
         $Object,
         $Name,
         [string]$Path = $Script:Path,
@@ -213,9 +213,9 @@ function Save-Object {
 function Select-ForwardableParameter {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Command,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
         [System.Collections.IDictionary]$Parameters,
         # Names of parameters to include in the result.
         [string[]]$Include,
@@ -223,7 +223,7 @@ function Select-ForwardableParameter {
         [string[]]$Exclude
     )
 
-    begin{}
+    begin {}
     process {
         if (-not ($cmd = Get-Command $Command -ErrorAction SilentlyContinue)) {
             return Write-Error -Message "Cannot find $Command"
@@ -253,7 +253,7 @@ function Select-ForwardableParameter {
         }
         $params
     }
-    end{}
+    end {}
 }
 
 
@@ -261,10 +261,10 @@ function Compress-Folder {
     [CmdletBinding()]
     param(
         # Folder path to compress
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Path,
         # Destination folder path
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Destination,
         # Filter for items in $Path
         [string[]]$Filter,
@@ -283,10 +283,10 @@ function Compress-Folder {
         [CmdletBinding()]
         param(
             # Folder path to compress
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Path,
             # Destination folder path
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Destination,
             # Filter for items in $Path
             [string[]]$Filter,
@@ -317,22 +317,22 @@ function Compress-Folder {
 
         # Apply filters if any.
         if ($Filter.Count) {
-            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object { -not $_.PSIsContainer } })
         }
         else {
-            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
 
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
-            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
         }
 
         if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne ([DateTime]::MaxValue)) {
-            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -le $ToDateTime })
         }
 
         # Remove duplicate by Fullname
-        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object { $_.Group | Select-Object -First 1 })
 
         # If there are no files after filters are applied, bail.
         if ($files.Count -eq 0) {
@@ -355,7 +355,7 @@ function Compress-Folder {
 
         if (Test-Path $zipFilePath) {
             # Append a random string to the zip file name.
-            $zipFileName =  $zipFileName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
+            $zipFileName = $zipFileName + "_" + [IO.Path]::GetRandomFileName().Substring(0, 8) + '.zip'
             $zipFilePath = Join-Path $Destination $zipFileName
         }
 
@@ -424,10 +424,10 @@ function Compress-Folder {
         [CmdletBinding()]
         param(
             # Folder path to compress
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Path,
             # Destination folder path
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Destination,
             # Filter for items in $Path
             [string[]]$Filter,
@@ -464,22 +464,22 @@ function Compress-Folder {
         else {
             # Apply filters.
             if ($Filter.Count) {
-                $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+                $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object { -not $_.PSIsContainer } })
             }
             else {
-                $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+                $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
             }
 
             if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
-                $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+                $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
             }
 
             if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
-                $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+                $files = @($files | Where-Object { $_.LastWriteTime -le $ToDateTime })
             }
 
             # Remove duplicate by Fullname
-            $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+            $files = @($files | Group-Object -Property 'FullName' | ForEach-Object { $_.Group | Select-Object -First 1 })
 
             # If there are no files after filters are applied, bail.
             if ($files.Count -eq 0) {
@@ -488,7 +488,7 @@ function Compress-Folder {
             }
 
             # Copy filtered files to a temporary folder
-            $tempPath = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName().Substring(0,8))
+            $tempPath = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName().Substring(0, 8))
             New-Item $tempPath -ItemType Directory | Out-Null
 
             foreach ($file in $files) {
@@ -521,7 +521,7 @@ function Compress-Folder {
 
         if (Test-Path $archivePath) {
             # Append a random string to the zip file name.
-            $archiveName =  $archiveName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8) + '.zip'
+            $archiveName = $archiveName + "_" + [IO.Path]::GetRandomFileName().Substring(0, 8) + '.zip'
             $archivePath = Join-Path $Destination $archiveName
         }
 
@@ -576,17 +576,17 @@ function Compress-Folder {
         [CmdletBinding()]
         param(
             # Folder path to compress
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Path,
             # Destination folder path
-            [Parameter(Mandatory=$true)]
+            [Parameter(Mandatory = $true)]
             [string]$Destination,
             # Filter for items in $Path
             [string[]]$Filter,
             # DateTime filters
             [DateTime]$FromDateTime,
             [DateTime]$ToDateTime,
-            [ValidateSet('MSZIP','LZX')]
+            [ValidateSet('MSZIP', 'LZX')]
             [string]$CompressionType = 'LZX'
         )
 
@@ -611,22 +611,22 @@ function Compress-Folder {
         }
 
         if ($Filter.Count) {
-            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object { -not $_.PSIsContainer } })
         }
         else {
-            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
 
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
-            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
         }
 
         if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
-            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -le $ToDateTime })
         }
 
         # Remove duplicate by Fullname
-        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object { $_.Group | Select-Object -First 1 })
 
         if ($files.Count -eq 0) {
             Write-Error "There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
@@ -686,7 +686,7 @@ function Compress-Folder {
 
         if (Test-Path $cabFilePath) {
             # Append a random string to the cab file name.
-            $cabName =  $cabName + "_" + [IO.Path]::GetRandomFileName().Substring(0,8)
+            $cabName = $cabName + "_" + [IO.Path]::GetRandomFileName().Substring(0, 8)
             $cabFilePath = Join-Path $Destination "$cabName.cab"
         }
 
@@ -724,7 +724,7 @@ function Compress-Folder {
     }
 
     $params = @{}
-    $PSBoundParameters.Keys | ForEach-Object { if ($compressCmd.Parameters.ContainsKey($_)) { $params.Add($_, $PSBoundParameters[$_])}}
+    $PSBoundParameters.Keys | ForEach-Object { if ($compressCmd.Parameters.ContainsKey($_)) { $params.Add($_, $PSBoundParameters[$_]) } }
     & $compressCmd @params
 }
 
@@ -752,14 +752,14 @@ function ConvertFrom-UNCPath {
 
     # Given Path can be a local path or remote path: e.g.
     # "\\Server\C$\temp\etc\" or "C:\temp\etc"
-    if (-not ($Path -match  '(\\\\(?<Server>[^\\]+)\\)?(?<Path>.*)')) {
+    if (-not ($Path -match '(\\\\(?<Server>[^\\]+)\\)?(?<Path>.*)')) {
         throw "$Path looks invalid (or bug here)"
     }
 
     $server = $Matches['Server']
     $localPath = $Matches['Path'].Replace('$', ':')
     New-Object PSCustomObject -Property @{
-        Server = $server
+        Server    = $server
         LocalPath = $localPath
     }
 }
@@ -854,21 +854,21 @@ function Save-Item {
 
         # Apply filters if any.
         if ($Filter.Count) {
-            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object {-not $_.PSIsContainer}})
+            $files = @(foreach ($f in $Filter) { Get-ChildItem -LiteralPath $Path -Filter $f -Recurse -Force | Where-Object { -not $_.PSIsContainer } })
         }
         else {
-            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object {-not $_.PSIsContainer})
+            $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
 
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
-            $files = @($files | Where-Object {$_.LastWriteTime -ge $FromDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
         }
 
         if ($PSBoundParameters.ContainsKey('ToDateTime') -and $ToDateTime -ne [DateTime]::MaxValue) {
-            $files = @($files | Where-Object {$_.LastWriteTime -le $ToDateTime})
+            $files = @($files | Where-Object { $_.LastWriteTime -le $ToDateTime })
         }
 
-        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object {$_.Group | Select-Object -First 1})
+        $files = @($files | Group-Object -Property 'FullName' | ForEach-Object { $_.Group | Select-Object -First 1 })
 
         if ($files.Count -eq 0) {
             Write-Error "There are no files after filters are applied. Server: $server, Path: $localPath, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
@@ -917,7 +917,7 @@ function Save-IISLog {
                     # The directory might contain environment variable (e.g. %SystemDrive%\inetpub\logs\LogFiles).
                     $directory = [System.Environment]::ExpandEnvironmentVariables($webSite.logFile.directory)
                     New-Object PSCustomObject -Property @{
-                        SiteName = $webSite.Name
+                        SiteName  = $webSite.Name
                         Directory = $directory
                     }
                 }
@@ -994,11 +994,11 @@ Save folder under %ExchangeInstallPath%Logging
 function Save-ExchangeLogging {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path, # destination
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $FolderPath, # subfolder path under %ExchangeInstallPath%Logging
         [DateTime]$FromDateTime,
         [DateTime]$ToDateTime
@@ -1041,12 +1041,12 @@ function Save-ExchangeLogging {
 function Save-TransportLog {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server,
-        [Parameter(Mandatory=$true)]
-        [ValidateSet('Connectivity', 'MessageTracking','SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Connectivity', 'MessageTracking', 'SendProtocol', 'ReceiveProtocol', 'RoutingTable', 'Queue')]
         $Type,
         [DateTime]$FromDateTime,
         [DateTime]$ToDateTime
@@ -1132,9 +1132,9 @@ function Get-DiagnosticsPath {
 function Save-ExchangeSetupLog {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
@@ -1146,9 +1146,9 @@ function Save-ExchangeSetupLog {
 function Save-FastSearchLog {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server,
         [DateTime]$FromDateTime,
         [DateTime]$ToDateTime
@@ -1165,17 +1165,17 @@ function Save-FastSearchLog {
 #>
 function Invoke-Ldifde {
     param (
-      [Parameter(Mandatory=$true)]
-      [string]$Path,
-      [string]$FileName = "Ldifde.txt"
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [string]$FileName = "Ldifde.txt"
     )
 
     # if Path doesn't exit, create it
     if (-not (Test-Path $Path)) {
-       New-Item -ItemType directory $Path | Out-Null
+        New-Item -ItemType directory $Path | Out-Null
     }
 
-    $resolvedPath  = Resolve-Path $Path -ErrorAction SilentlyContinue
+    $resolvedPath = Resolve-Path $Path -ErrorAction SilentlyContinue
     $filePath = Join-Path -Path $resolvedPath -ChildPath $FileName
 
     # Check if Ldifde.exe exists
@@ -1243,10 +1243,10 @@ function Get-Runspace {
             $Script:ExchangeRemotePS = $true
 
             # Remember the primary runspace so that its ConnectionInfo can be used when creating a new remote runspace.
-            $Script:PrimaryRunspace = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available -and  $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1 -ExpandProperty Runspace
+            $Script:PrimaryRunspace = Get-PSSession | Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*' } | Select-Object -First 1 -ExpandProperty Runspace
             if (-not $Script:PrimaryRunspace) {
                 # If "Available" runspace is not there, then select whichever
-                $Script:PrimaryRunspace = Get-PSSession | Where-Object {$_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*'} | Select-Object -First 1 -ExpandProperty Runspace
+                $Script:PrimaryRunspace = Get-PSSession | Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*' } | Select-Object -First 1 -ExpandProperty Runspace
             }
 
             $Script:RunspacePool.Add($Script:PrimaryRunspace)
@@ -1254,7 +1254,7 @@ function Get-Runspace {
     }
 
     # Find an available runspace
-    $rs = $Script:RunspacePool | Where-Object {$_.RunspaceAvailability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available} | Select-Object -First 1
+    $rs = $Script:RunspacePool | Where-Object { $_.RunspaceAvailability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available } | Select-Object -First 1
     if ($rs) {
         return $rs
     }
@@ -1267,7 +1267,7 @@ function Get-Runspace {
         # Add Exchange Local PowerShell so that it's ready to be used.
         $ps = [PowerShell]::Create()
         $ps.Runspace = $rs
-        $ps.AddCommand('Add-PSSnapin').AddParameter('Name','Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
+        $ps.AddCommand('Add-PSSnapin').AddParameter('Name', 'Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
         $ps.Invoke() | Out-Null
         $ps.Dispose()
     }
@@ -1303,7 +1303,7 @@ https://web.archive.org/web/20190222052659/http://www.nivot.org/blog/post/2009/1
 #>
 function New-AsyncCallback {
     param (
-        [parameter(Mandatory=$true)]
+        [parameter(Mandatory = $true)]
         [scriptblock]$Callback
     )
 
@@ -1363,7 +1363,7 @@ function New-AsyncCallback {
 function RunCommand {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Command,
         [int]$TimeoutSeconds
     )
@@ -1408,36 +1408,36 @@ function RunCommand {
 
     if ($paramMatches) {
         $paramList = @(
-        foreach($paramMatch in $paramMatches.Matches) {
-            $paramName = $paramMatch.Groups['paramName'].Value
-            $paramValue = $paramMatch.Groups['paramVal'].Value
+            foreach ($paramMatch in $paramMatches.Matches) {
+                $paramName = $paramMatch.Groups['paramName'].Value
+                $paramValue = $paramMatch.Groups['paramVal'].Value
 
-            $params = @(
-            foreach ($param in $cmd.Parameters.GetEnumerator()) {
-                if ($param.Key -like "$paramName*") {
-                    $param
+                $params = @(
+                    foreach ($param in $cmd.Parameters.GetEnumerator()) {
+                        if ($param.Key -like "$paramName*") {
+                            $param
+                        }
+                    })
+
+                # If there's no match or too many matches, ignore.
+                if ($params.Count -eq 0) {
+                    Write-Log "Parameter '$paramName' is not available for $cmdlet"
+                    continue
                 }
-            })
+                elseif ($params.Count -gt 1) {
+                    Write-Log "Parameter '$paramName' is ambiguous for $cmdlet"
+                    continue
+                }
 
-            # If there's no match or too many matches, ignore.
-            if ($params.Count -eq 0) {
-                Write-Log "Parameter '$paramName' is not available for $cmdlet"
-                continue
-            }
-            elseif ($params.Count -gt 1) {
-                Write-Log "Parameter '$paramName' is ambiguous for $cmdlet"
-                continue
-            }
+                if ($ps -and $params[0].Value.SwitchParameter) {
+                    $psCommand.AddParameter($params[0].Key) | Out-Null
+                }
+                elseif ($ps) {
+                    $psCommand.AddParameter($params[0].Key, $paramValue) | Out-Null
+                }
 
-            if ($ps -and $params[0].Value.SwitchParameter) {
-                $psCommand.AddParameter($params[0].Key) | Out-Null
+                Write-Output $params[0]
             }
-            elseif ($ps) {
-                $psCommand.AddParameter($params[0].Key, $paramValue) | Out-Null
-            }
-
-            Write-Output $params[0]
-        }
         ) # end of $paramList array subexpression
     }
 
@@ -1458,7 +1458,7 @@ function RunCommand {
                     }
 
                 }
-           }
+            }
         }
     }
 
@@ -1492,7 +1492,7 @@ function RunCommand {
             $_.GetType() | Out-Null
             $_.Exception.GetType() | Out-Null
             Write-Log "[Terminating Error] '$Command' failed. $($_.ToString()) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
-            if ($null -ne $Script:errs) {$Script.errs.Add($_)}
+            if ($null -ne $Script:errs) { $Script.errs.Add($_) }
         }
         catch {
             Write-Log "$Command threw a non-CLS-compliant exception object."
@@ -1520,7 +1520,7 @@ function RunCommand {
             if ($ps.InvocationStateInfo.State -eq "Running") {
                 # Asychronously stop the command and dispose the powershell instance.
                 $context = New-Object PSCustomObject -Property @{
-                    PowerShell = $ps
+                    PowerShell  = $ps
                     AsyncResult = $ar
                 }
 
@@ -1550,11 +1550,11 @@ function RunCommand {
 function Run {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Command,
         [string[]]$Servers,
         [string]$Identifier = "Server",
-        [Parameter(ValueFromPipeline=$true)]
+        [Parameter(ValueFromPipeline = $true)]
         [object[]]$ResultCollection,
         [switch]$RemoveDuplicate,
         [switch]$PassThru,
@@ -1612,7 +1612,7 @@ function Run {
                             }
                             # This is for PowerShell V2
                             # $entry | Add-Member -Type NoteProperty -Name:ServerName -Value:$Server
-                            $entry = $entry | Select-Object *, @{N='ServerName';E={$Server}}
+                            $entry = $entry | Select-Object *, @{N = 'ServerName'; E = { $Server } }
                         }
 
                         $entry
@@ -1699,7 +1699,7 @@ function Run {
                     continue
                 }
 
-                $dups = @($result | Where-Object {$_.$dupCheckProp.ToString() -eq $o.$dupCheckProp.ToString()})
+                $dups = @($result | Where-Object { $_.$dupCheckProp.ToString() -eq $o.$dupCheckProp.ToString() })
 
                 if ($dups.Count) {
                     Write-Log "Dropping a duplicate: '$($o.$dupCheckProp.ToString())'"
@@ -1729,7 +1729,7 @@ function Run {
 function Write-Log {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
         [string]$Text,
         [string]$Path = $Script:logPath
     )
@@ -1778,7 +1778,7 @@ function Get-VirtualDirectory {
 
     # List of Get-*VirtualDirectory commands.
     # CommantType can be different depending on whether Local PowerShell or Remote PowerShell
-    $commands = @(Get-Command Get-*VirtualDirectory -ErrorAction:SilentlyContinue | Where-Object {$_.name -ne 'Get-WebVirtualDirectory' -and $_.name -ne 'Get-VirtualDirectory'})
+    $commands = @(Get-Command Get-*VirtualDirectory -ErrorAction:SilentlyContinue | Where-Object { $_.name -ne 'Get-WebVirtualDirectory' -and $_.name -ne 'Get-VirtualDirectory' })
     $commands += @(Get-Command Get-OutlookAnywhere -ErrorAction:SilentlyContinue)
 
     foreach ($command in $commands) {
@@ -1786,8 +1786,8 @@ function Get-VirtualDirectory {
         if ($command.Parameters -and $command.Parameters.ContainsKey('ShowMailboxVirtualDirectories')) {
             # if IncludeIISVirtualDirectories, then access direct access servers. otherwise, don't touch servers (only AD)
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
-                    Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
+                Run "$($command.Name) -ShowMailboxVirtualDirectories" -Servers:($allExchangeServers | Where-Object { $_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess }) -RemoveDuplicate -PassThru |
+                Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
             }
             else {
                 Run "$($command.Name) -ADPropertiesOnly -ShowMailboxVirtualDirectories" -RemoveDuplicate
@@ -1795,8 +1795,8 @@ function Get-VirtualDirectory {
         }
         else {
             if ($IncludeIISVirtualDirectories) {
-                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object {$_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
-                    Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
+                Run "$($command.Name)" -Servers:($allExchangeServers | Where-Object { $_.IsExchange2007OrLater -and $_.IsClientAccessServer -and $_.IsDirectAccess }) -RemoveDuplicate -PassThru |
+                Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
             }
             else {
                 Run "$($command.Name) -ADPropertiesOnly" -RemoveDuplicate
@@ -1808,7 +1808,7 @@ function Get-VirtualDirectory {
 function Invoke-FIPS {
     [CmdletBinding()]
     param(
-    [string[]]$Servers
+        [string[]]$Servers
     )
 
     if (-not $Servers.Count) {
@@ -1829,9 +1829,9 @@ function Invoke-FIPS {
 
             $session = New-PSSession -ComputerName $server
             $FIPSCmdlets = @(Invoke-Command -Session $session -ScriptBlock $scriptblock -ErrorAction SilentlyContinue `
-                | Where-Object {$_.Name -like "Get-*" -and $_.Name -ne "Get-ConfigurationValue"})
+                | Where-Object { $_.Name -like "Get-*" -and $_.Name -ne "Get-ConfigurationValue" })
 
-            foreach ($cmdlet in $FIPSCmdlets){
+            foreach ($cmdlet in $FIPSCmdlets) {
                 $scriptblock = $ExecutionContext.InvokeCommand.NewScriptBlock($cmdlet)
                 Write-Log "Running $cmdlet on $server"
 
@@ -1876,7 +1876,7 @@ function Get-SPN {
     )
 
     # Make sure Path exists; if not, just return error string
-    $resolvedPath  = Resolve-Path $Path -ErrorAction SilentlyContinue
+    $resolvedPath = Resolve-Path $Path -ErrorAction SilentlyContinue
     if (-not $resolvedPath) {
         #$PSCmdlet.ThrowTerminatingError((New-Object System.Management.Automation.ErrorRecord "Path '$Path' doesn't exist", $null, ([System.Management.Automation.ErrorCategory]::InvalidData), $null))
         throw "Path '$Path' doesn't exist"
@@ -1931,7 +1931,7 @@ function Invoke-ShellCommand {
     $startInfo.UseShellExecute = $false
     $startInfo.Arguments = $Argument
     #$startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $startInfo.CreateNoWindow  = $true
+    $startInfo.CreateNoWindow = $true
 
     $process = $job = $null
 
@@ -1966,7 +1966,7 @@ function Invoke-ShellCommand {
         $process.WaitForExit()
         $exitCode = $process.ExitCode
 
-        New-Object -TypeName PSCustomObject -Property @{PID = $processId; StdOut = $stdOut; StdErr = $stdErr.ToString(); ExitCode = $exitCode}
+        New-Object -TypeName PSCustomObject -Property @{PID = $processId; StdOut = $stdOut; StdErr = $stdErr.ToString(); ExitCode = $exitCode }
 
     }
     finally {
@@ -1988,7 +1988,7 @@ function Invoke-ShellCommand {
 function Get-MSInfo32 {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$True)]
+        [Parameter(Mandatory = $True)]
         $Servers
     )
 
@@ -2015,7 +2015,7 @@ function Save-ExchangeEventLog {
     [CmdletBinding()]
     param
     (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path,
         $Server,
         [switch]$IncludeCrimsonLogs,
@@ -2043,7 +2043,7 @@ function Save-ExchangeEventLog {
 
     Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $Server ..."
     # By default, collect app and sys logs
-    $logs = "Application","System"
+    $logs = "Application", "System"
 
     # Add crimson logs if requested
     if ($IncludeCrimsonLogs) {
@@ -2073,7 +2073,7 @@ This function will throw on failure.
 function Get-WindowsTempFolder {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
@@ -2103,7 +2103,7 @@ This function will throw on failure.
 function Get-ExchangeInstallPath {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
@@ -2120,7 +2120,7 @@ function Get-ExchangeInstallPath {
         $Script:Win32EnvCache.Add($Server, $win32env)
     }
 
-    $exchangePath = $win32env | Where-Object {$_.Name -eq 'ExchangeInstallPath'} | Select-Object -First 1
+    $exchangePath = $win32env | Where-Object { $_.Name -eq 'ExchangeInstallPath' } | Select-Object -First 1
     if (-not $exchangePath.VariableValue) {
         Write-Error "Cannot find ExchangeInstallPath on $Server"
         return
@@ -2177,8 +2177,8 @@ function Get-DotNetVersion {
             }
 
             $result = @(
-                foreach ($versionKeyName in $ndpKey.GetSubKeyNames())  {
-                    if ($null -eq $versionKeyName) {continue}
+                foreach ($versionKeyName in $ndpKey.GetSubKeyNames()) {
+                    if ($null -eq $versionKeyName) { continue }
 
                     $versionKey = $null
                     try {
@@ -2199,13 +2199,13 @@ function Get-DotNetVersion {
 
                         if ($version) {
                             New-Object PSCustomObject -Property @{
-                                Version = $version
-                                SP = $sp
-                                Install = $install
-                                SubKey = $null
-                                Release = $release
+                                Version      = $version
+                                SP           = $sp
+                                Install      = $install
+                                SubKey       = $null
+                                Release      = $release
                                 NET45Version = $null
-                                ServerName = $Server
+                                ServerName   = $Server
                             }
 
                             continue
@@ -2213,7 +2213,7 @@ function Get-DotNetVersion {
 
                         # for v4 and V4.0, check sub keys
                         foreach ($subKeyName in $versionKey.GetSubKeyNames()) {
-                            if ($null -eq $subKeyName) {continue}
+                            if ($null -eq $subKeyName) { continue }
 
                             $subKey = $null
                             try {
@@ -2235,22 +2235,22 @@ function Get-DotNetVersion {
                                 }
 
                                 New-Object PSCustomObject -Property @{
-                                    Version = $version
-                                    SP = $sp
-                                    Install = $install
-                                    SubKey = $subKeyName
-                                    Release = $release
+                                    Version      = $version
+                                    SP           = $sp
+                                    Install      = $install
+                                    SubKey       = $subKeyName
+                                    Release      = $release
                                     NET45Version = $NET45Version
-                                    ServerName = $Server
+                                    ServerName   = $Server
                                 }
                             }
                             finally {
-                                if ($subKey) {$subKey.Close()}
+                                if ($subKey) { $subKey.Close() }
                             }
                         }
                     }
                     finally {
-                        if ($versionKey) {$versionKey.Close()}
+                        if ($versionKey) { $versionKey.Close() }
                     }
                 }
             )
@@ -2272,158 +2272,158 @@ function Get-Net45Version {
     [CmdletBinding()]
     [OutputType([string])]
     param (
-        [Parameter(Mandatory=$True)]
+        [Parameter(Mandatory = $True)]
         $Release
     )
 
     switch ($Release) {
-        {$_ -ge 528040} {'4.8 or later'; break}
-        {$_ -ge 461808} {'4.7.2'; break}
-        {$_ -ge 460798} {'4.7'; break}
-        {$_ -ge 394802} {"4.6.2"; break}
-        {$_ -ge 394254} {"4.6.1"; break}
-        {$_ -ge 393295} {"4.6"; break}
-        {$_ -ge 379893} {"4.5.2"; break}
-        {$_ -ge 378675} {'4.5.1'; break}
-        {$_ -ge 378389} {'4.5'; break}
-        default {$null}
+        { $_ -ge 528040 } { '4.8 or later'; break }
+        { $_ -ge 461808 } { '4.7.2'; break }
+        { $_ -ge 460798 } { '4.7'; break }
+        { $_ -ge 394802 } { "4.6.2"; break }
+        { $_ -ge 394254 } { "4.6.1"; break }
+        { $_ -ge 393295 } { "4.6"; break }
+        { $_ -ge 379893 } { "4.5.2"; break }
+        { $_ -ge 378675 } { '4.5.1'; break }
+        { $_ -ge 378389 } { '4.5'; break }
+        default { $null }
     }
 }
 
 function Get-TlsRegistry {
     [CmdletBinding()]
     param(
-        [parameter(ValueFromPipeline=$true)]
-        [string]$Server= $env:COMPUTERNAME
+        [parameter(ValueFromPipeline = $true)]
+        [string]$Server = $env:COMPUTERNAME
     )
 
-    Begin{}
+    Begin {}
 
     Process {
-    $reg = $protocols = $null
-    try {
-        $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
+        $reg = $protocols = $null
+        try {
+            $reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
 
-        # OS SChannel related
-        $protocols = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\')
+            # OS SChannel related
+            $protocols = $reg.OpenSubKey('SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\')
 
-        # Note: OpenSubKey returns $null if the operation failed.
-        if ($protocols) {
-            foreach ($protocolKeyName in $protocols.GetSubKeyNames()) {
-                $protocolKey = $null
+            # Note: OpenSubKey returns $null if the operation failed.
+            if ($protocols) {
+                foreach ($protocolKeyName in $protocols.GetSubKeyNames()) {
+                    $protocolKey = $null
+                    try {
+                        # subKeyName is "SSL 2.0", "TLS 1.0", etc
+                        $protocolKey = $protocols.OpenSubKey($protocolKeyName)
+                        if (-not $protocolKey) {
+                            Write-Error "OpenSubKey failed for $protocolKeyName on $Server. Skipping."
+                            continue
+                        }
+
+                        foreach ($subKeyName in $protocolKey.GetSubKeyNames()) {
+                            if ($null -eq $subKeyName) { continue }
+
+                            $subKey = $null
+                            try {
+                                $subKey = $protocolKey.OpenSubKey($subKeyName)
+                                if (-not $subKey) {
+                                    Write-Error "OpenSubKey failed for $subKeyName on $Server. Skipping."
+                                    continue
+                                }
+
+                                $disabledByDefault = $subKey.GetValue('DisabledByDefault', '')
+                                $enabled = $subKey.GetValue('Enabled', '')
+
+                                New-Object PSCustomObject -Property @{
+                                    ServerName        = $Server
+                                    Name              = "SChannel $protocolKeyName $subKeyName"
+                                    DisabledByDefault = $disabledByDefault
+                                    Enabled           = $enabled
+                                    RegistryKey       = $subKey.Name
+                                }
+                            }
+                            finally {
+                                if ($subKey) { $subKey.Close() }
+                            }
+                        }
+                    }
+                    finally {
+                        if ($protocolKey) { $protocolKey.Close() }
+                    }
+                }
+            }
+            else {
+                # If OpenSubKey failed, write to error stream and flow through.
+                Write-Error "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\' on $Server"
+            }
+
+            # .NET related
+            $netKeyNames = @('SOFTWARE\Microsoft\.NETFramework\', 'SOFTWARE\Wow6432Node\Microsoft\.NETFramework\')
+            foreach ($netKeyName in $netKeyNames) {
+                $netKey = $null
                 try {
-                    # subKeyName is "SSL 2.0", "TLS 1.0", etc
-                    $protocolKey = $protocols.OpenSubKey($protocolKeyName)
-                    if (-not $protocolKey) {
-                        Write-Error "OpenSubKey failed for $protocolKeyName on $Server. Skipping."
+                    $netKey = $reg.OpenSubKey($netKeyName)
+                    if (-not $netKey) {
+                        Write-Error "OpenSubKey failed on $netKeyName on $Server. Skipping."
                         continue
                     }
 
-                    foreach ($subKeyName in $protocolKey.GetSubKeyNames()) {
-                        if ($null -eq $subKeyName) { continue }
+                    $netSubKeyNames = @('v2.0.50727', 'v4.0.30319')
 
+                    foreach ($subKeyName in $netSubKeyNames) {
                         $subKey = $null
                         try {
-                            $subKey = $protocolKey.OpenSubKey($subKeyName)
+                            $subKey = $netKey.OpenSubKey($subKeyName)
                             if (-not $subKey) {
                                 Write-Error "OpenSubKey failed for $subKeyName on $Server. Skipping."
                                 continue
                             }
 
-                            $disabledByDefault = $subKey.GetValue('DisabledByDefault', '')
-                            $enabled = $subKey.GetValue('Enabled', '')
+                            $systemDefaultTlsVersions = $subKey.GetValue('SystemDefaultTlsVersions', '')
+                            $schUseStrongCrypto = $subKey.GetValue('SchUseStrongCrypto', '')
+
+                            if ($subKey.Name.IndexOf('Wow6432Node', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                                $name = ".NET Framework $subKeyName (Wow6432Node)"
+                            }
+                            else {
+                                $name = ".NET Framework $subKeyName"
+                            }
 
                             New-Object PSCustomObject -Property @{
-                                ServerName = $Server
-                                Name = "SChannel $protocolKeyName $subKeyName"
-                                DisabledByDefault = $disabledByDefault
-                                Enabled = $enabled
-                                RegistryKey = $subKey.Name
+                                ServerName               = $Server
+                                Name                     = $name
+                                SystemDefaultTlsVersions = $systemDefaultTlsVersions
+                                SchUseStrongCrypto       = $schUseStrongCrypto
+                                RegistryKey              = $subKey.Name
                             }
                         }
                         finally {
-                            if ($subKey) {$subKey.Close()}
+                            if ($subKey) { $subKey.Close() }
                         }
                     }
                 }
                 finally {
-                    if ($protocolKey) {$protocolKey.Close()}
+                    if ($netKey) { $netKey.Close() }
                 }
             }
         }
-        else {
-            # If OpenSubKey failed, write to error stream and flow through.
-            Write-Error "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\' on $Server"
+        finally {
+            if ($protocols) { $protocols.Close() }
+            if ($reg) { $reg.Close() }
         }
-
-        # .NET related
-        $netKeyNames = @('SOFTWARE\Microsoft\.NETFramework\', 'SOFTWARE\Wow6432Node\Microsoft\.NETFramework\')
-        foreach ($netKeyName in $netKeyNames) {
-            $netKey = $null
-            try {
-                $netKey = $reg.OpenSubKey($netKeyName)
-                if (-not $netKey) {
-                    Write-Error "OpenSubKey failed on $netKeyName on $Server. Skipping."
-                    continue
-                }
-
-                $netSubKeyNames = @('v2.0.50727','v4.0.30319')
-
-                foreach ($subKeyName in $netSubKeyNames) {
-                    $subKey = $null
-                    try {
-                        $subKey = $netKey.OpenSubKey($subKeyName)
-                        if (-not $subKey) {
-                            Write-Error "OpenSubKey failed for $subKeyName on $Server. Skipping."
-                            continue
-                        }
-
-                        $systemDefaultTlsVersions = $subKey.GetValue('SystemDefaultTlsVersions','')
-                        $schUseStrongCrypto = $subKey.GetValue('SchUseStrongCrypto','')
-
-                        if ($subKey.Name.IndexOf('Wow6432Node', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                            $name = ".NET Framework $subKeyName (Wow6432Node)"
-                        }
-                        else {
-                            $name = ".NET Framework $subKeyName"
-                        }
-
-                        New-Object PSCustomObject -Property @{
-                            ServerName = $Server
-                            Name = $name
-                            SystemDefaultTlsVersions = $systemDefaultTlsVersions
-                            SchUseStrongCrypto = $schUseStrongCrypto
-                            RegistryKey = $subKey.Name
-                        }
-                    }
-                    finally {
-                        if ($subKey) {$subKey.Close()}
-                    }
-                }
-            }
-            finally {
-                if ($netKey) { $netKey.Close() }
-            }
-        }
-    }
-    finally {
-        if ($protocols) { $protocols.Close() }
-        if ($reg) { $reg.Close() }
-    }
 
     } # End of process{}
 
-    End{}
+    End {}
 }
 
 function Get-TCPIP6Registry {
     [CmdletBinding()]
     param(
-        [parameter(ValueFromPipeline=$true)]
+        [parameter(ValueFromPipeline = $true)]
         [string]$Server = $env:COMPUTERNAME
     )
 
-    begin{}
+    begin {}
 
     process {
         $reg = $key = $null
@@ -2434,9 +2434,9 @@ function Get-TCPIP6Registry {
                 throw "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\' on $Server"
             }
 
-            $disabledComponents = $key.GetValue('DisabledComponents','')
+            $disabledComponents = $key.GetValue('DisabledComponents', '')
             New-Object PSCustomObject -Property @{
-                ServerName = $Server;
+                ServerName         = $Server;
                 DisabledComponents = $disabledComponents
             }
         }
@@ -2446,7 +2446,7 @@ function Get-TCPIP6Registry {
         }
     }
 
-    end{}
+    end {}
 }
 
 function Get-SmbConfig {
@@ -2466,10 +2466,10 @@ function Get-SmbConfig {
             throw "OpenSubKey failed for 'SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\' on $Server"
         }
 
-        $smb1 = $key.GetValue('SMB1','')
+        $smb1 = $key.GetValue('SMB1', '')
         New-Object PSCustomObject -Property @{
             ServerName = $Server
-            SMB1 = $smb1
+            SMB1       = $smb1
         }
     }
     finally {
@@ -2481,13 +2481,13 @@ function Get-SmbConfig {
 function Get-FipsAlgorithmPolicy {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
         [string]$Server
     )
 
-    begin{}
+    begin {}
 
-    process{
+    process {
         $hklm = $key = $null
         try {
             $hklm = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $Server)
@@ -2502,7 +2502,7 @@ function Get-FipsAlgorithmPolicy {
 
             New-Object PSCustomObject -Property @{
                 ServerName = $Server
-                Enabled = $enabled -ne 0
+                Enabled    = $enabled -ne 0
             }
 
         }
@@ -2511,17 +2511,17 @@ function Get-FipsAlgorithmPolicy {
         }
         finally {
             if ($key) { $key.Close() }
-            if ($hklm) {$hklm.Close() }
+            if ($hklm) { $hklm.Close() }
         }
     }
 
-    end{}
+    end {}
 }
 
 function Get-IISWebBinding {
     [CmdletBinding()]
     param(
-        [parameter(ValueFromPipeline=$true)]
+        [parameter(ValueFromPipeline = $true)]
         [string]$Server
     )
 
@@ -2556,7 +2556,7 @@ function Get-IISWebBinding {
             }
         }
     }
-    end{}
+    end {}
 }
 
 function Get-ExSetupVersion {
@@ -2625,8 +2625,8 @@ public static extern bool WinHttpGetDefaultProxyConfiguration(out WINHTTP_PROXY_
 function Get-ProxySetting {
     [CmdletBinding()]
     param(
-    [Alias('ComputerName')]
-    [string]$Server = $env:COMPUTERNAME
+        [Alias('ComputerName')]
+        [string]$Server = $env:COMPUTERNAME
     )
 
     if ($env:COMPUTERNAME -eq $Server) {
@@ -2654,7 +2654,7 @@ function Get-ProxySetting {
 function Get-NetworkInterface {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory =  $true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
@@ -2707,7 +2707,7 @@ Check the state of Transport's UnifiedContent folder.
 function Get-UnifiedContent {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
@@ -2750,10 +2750,10 @@ function Get-UnifiedContent {
         }
 
         New-Object PSCustomObject -Property @{
-            Server = $Server.ToString()
+            Server               = $Server.ToString()
             TemporaryStoragePath = $tempPath
-            TotalBytes = $totalSize
-            Count = $count
+            TotalBytes           = $totalSize
+            Count                = $count
         }
     }
     finally {
@@ -2770,13 +2770,13 @@ function Save-AppConfig {
     [CmdletBinding()]
     param(
         # Where to save the file
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Path,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Server
     )
 
-    $exServer = $Script:allExchangeServers | Where-Object {$_.Name -eq $Server}
+    $exServer = $Script:allExchangeServers | Where-Object { $_.Name -eq $Server }
     if (-not $exServer) {
         $exServer = Get-ExchangeServer $Server
     }
@@ -2807,15 +2807,13 @@ function Save-AppConfig {
     # Save-Item -SourcePath $casFolderUNC -DestinationPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
 }
 
-function Get-InstalledUpdate
-{
+function Get-InstalledUpdate {
     [CmdletBinding()]
     param(
-    [string]$Server = $env:COMPUTERNAME
+        [string]$Server = $env:COMPUTERNAME
     )
 
-    function Get-InstalledUpdateInternal
-    {
+    function Get-InstalledUpdateInternal {
         [CmdletBinding()]
         param()
 
@@ -2900,12 +2898,12 @@ function Get-NLMConnectivity {
         NLM_CONNECTIVITY_DISCONNECTED      = 0
         NLM_CONNECTIVITY_IPV4_NOTRAFFIC    = 1
         NLM_CONNECTIVITY_IPV6_NOTRAFFIC    = 2
-        NLM_CONNECTIVITY_IPV4_SUBNET	   = 0x10
+        NLM_CONNECTIVITY_IPV4_SUBNET       = 0x10
         NLM_CONNECTIVITY_IPV4_LOCALNETWORK = 0x20
-        NLM_CONNECTIVITY_IPV4_INTERNET	   = 0x40
-        NLM_CONNECTIVITY_IPV6_SUBNET	   = 0x100
+        NLM_CONNECTIVITY_IPV4_INTERNET     = 0x40
+        NLM_CONNECTIVITY_IPV6_SUBNET       = 0x100
         NLM_CONNECTIVITY_IPV6_LOCALNETWORK = 0x200
-        NLM_CONNECTIVITY_IPV6_INTERNET	   = 0x400
+        NLM_CONNECTIVITY_IPV6_INTERNET     = 0x400
     }
 
     $connectivity = New-Object System.Collections.Generic.List[string]
@@ -2918,7 +2916,7 @@ function Get-NLMConnectivity {
 
     [PSCustomObject]@{
         IsConnectedToInternet = $isConnectedToInternet
-        Connectivity = $connectivity
+        Connectivity          = $connectivity
     }
 }
 
@@ -2982,10 +2980,10 @@ function Invoke-AutoUpdate {
             Write-Progress -Activity "AutoUpdate" -Status "done" -Completed
         }
     }
-        New-Object PSCustomObject -Property @{
-            Success = $autoUpdateSuccess
-            Message = $message
-        }
+    New-Object PSCustomObject -Property @{
+        Success = $autoUpdateSuccess
+        Message = $message
+    }
 }
 
 
@@ -3120,7 +3118,7 @@ foreach ($server in $Servers) {
         }
 
         # Add if it's not a duplicate
-        $inDAS = @($directAccessCandidates | Where-Object {$_.Name -eq $exServer.Name}).Count -gt 0
+        $inDAS = @($directAccessCandidates | Where-Object { $_.Name -eq $exServer.Name }).Count -gt 0
         if (-not $inDAS) {
             $directAccessCandidates.Add($exServer)
         }
@@ -3152,7 +3150,7 @@ else {
 }
 
 foreach ($server in $allExchangeServers) {
-    if (@($directAccessServers | Where-Object {$_.Name -eq $server}).Count -gt 0) {
+    if (@($directAccessServers | Where-Object { $_.Name -eq $server }).Count -gt 0) {
         $server.IsDirectAccess = $true
     }
 }
@@ -3180,323 +3178,323 @@ catch {
 
 # Start of try for transcript
 try {
-# Write-Progress's Activity string
-$collectionActivity = "Collecting Data"
+    # Write-Progress's Activity string
+    $collectionActivity = "Collecting Data"
 
-# org settings
-Write-Progress -Activity:$collectionActivity -Status:"Org Settings" -PercentComplete:0
+    # org settings
+    Write-Progress -Activity:$collectionActivity -Status:"Org Settings" -PercentComplete:0
 
-# When you don't specify 'Path' for Save-Object, it's saved to $Script:Path
-$OrgConfig | Save-Object -Name "OrganizationConfig"
-Run Get-AdminAuditLogConfig
-Run Get-AvailabilityAddressSpace
-Run Get-AvailabilityConfig
-Run Get-OrganizationRelationship
-Run "Get-ADServerSettings -WarningAction SilentlyContinue"
-Run Get-AuthConfig
-Run Get-AuthRedirect
-Run Get-AuthServer
-Run Get-PartnerApplication
-Run Get-DomainController
-Run Get-IRMConfiguration
-Run Get-OfflineAddressBook
-# Run Get-OrganizationalUnit
-Run Get-OutlookProvider
-Run Get-OwaMailboxPolicy
-Run Get-ResourceConfig
-Run Get-SmimeConfig
-Run Get-UserPrincipalNamesSuffix
-Run Get-AuthenticationPolicy
-Run Get-ClientAccessRule
-Write-Log "Org done"
+    # When you don't specify 'Path' for Save-Object, it's saved to $Script:Path
+    $OrgConfig | Save-Object -Name "OrganizationConfig"
+    Run Get-AdminAuditLogConfig
+    Run Get-AvailabilityAddressSpace
+    Run Get-AvailabilityConfig
+    Run Get-OrganizationRelationship
+    Run "Get-ADServerSettings -WarningAction SilentlyContinue"
+    Run Get-AuthConfig
+    Run Get-AuthRedirect
+    Run Get-AuthServer
+    Run Get-PartnerApplication
+    Run Get-DomainController
+    Run Get-IRMConfiguration
+    Run Get-OfflineAddressBook
+    # Run Get-OrganizationalUnit
+    Run Get-OutlookProvider
+    Run Get-OwaMailboxPolicy
+    Run Get-ResourceConfig
+    Run Get-SmimeConfig
+    Run Get-UserPrincipalNamesSuffix
+    Run Get-AuthenticationPolicy
+    Run Get-ClientAccessRule
+    Write-Log "Org done"
 
-# ActiveSync
-Write-Progress -Activity:$collectionActivity -Status:"ActiveSync Settings" -PercentComplete:10
-Run Get-ActiveSyncDeviceAccessRule
-Run Get-ActiveSyncDeviceAutoblockThreshold
-Run Get-ActiveSyncDeviceClass
-Run "Get-ActiveSyncMailboxPolicy -WarningAction:SilentlyContinue"
-Run Get-MobileDeviceMailboxPolicy
-Run Get-ActiveSyncOrganizationSettings
+    # ActiveSync
+    Write-Progress -Activity:$collectionActivity -Status:"ActiveSync Settings" -PercentComplete:10
+    Run Get-ActiveSyncDeviceAccessRule
+    Run Get-ActiveSyncDeviceAutoblockThreshold
+    Run Get-ActiveSyncDeviceClass
+    Run "Get-ActiveSyncMailboxPolicy -WarningAction:SilentlyContinue"
+    Run Get-MobileDeviceMailboxPolicy
+    Run Get-ActiveSyncOrganizationSettings
 
-# Transport Settings
-Write-Progress -Activity:$collectionActivity -Status:"Transport Settings" -PercentComplete:20
-Run Get-TransportConfig
-Run Get-AcceptedDomain
-Run Get-ReceiveConnector
-Run Get-SendConnector
-Run Get-ForeignConnector
-Run Get-RemoteDomain
-Run Get-ClassificationRuleCollection
-Run Get-ContentFilterConfig
-Run Get-ContentFilterPhrase
-#Run Get-DataClassification
-Run Get-DeliveryAgentConnector
-Run Get-DlpPolicy
-# Run Get-DlpPolicyTemplate
-Run Get-EdgeSubscription
-Run Get-EdgeSyncServiceConfig
-Run Get-EmailAddressPolicy
-Run Get-HostedContentFilterRule
-Run Get-IPAllowListConfig
-Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer})
-Run Get-IPAllowListProvider
-Run Get-IPAllowListProvidersConfig
-Run Get-IPBlockListConfig
-Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsHubTransportServer})
-Run Get-IPBlockListProvider
-Run Get-IPBlockListProvidersConfig
-Run Get-JournalRule
-Run Get-RecipientFilterConfig
-Run Get-RMSTemplate
-Run Get-SenderFilterConfig
-Run Get-SenderIdConfig
-Run Get-SenderReputationConfig
-Run Get-TransportRule
-# these cmdlets are meant to run locally and don't have Server specifiers (-Server, -Identity)
-#Run Get-TransportAgent
-#Run Get-TransportPipeline
+    # Transport Settings
+    Write-Progress -Activity:$collectionActivity -Status:"Transport Settings" -PercentComplete:20
+    Run Get-TransportConfig
+    Run Get-AcceptedDomain
+    Run Get-ReceiveConnector
+    Run Get-SendConnector
+    Run Get-ForeignConnector
+    Run Get-RemoteDomain
+    Run Get-ClassificationRuleCollection
+    Run Get-ContentFilterConfig
+    Run Get-ContentFilterPhrase
+    #Run Get-DataClassification
+    Run Get-DeliveryAgentConnector
+    Run Get-DlpPolicy
+    # Run Get-DlpPolicyTemplate
+    Run Get-EdgeSubscription
+    Run Get-EdgeSyncServiceConfig
+    Run Get-EmailAddressPolicy
+    Run Get-HostedContentFilterRule
+    Run Get-IPAllowListConfig
+    Run Get-IPAllowListEntry -Servers:($directAccessServers | Where-Object { $_.IsE14OrLater -and $_.IsHubTransportServer })
+    Run Get-IPAllowListProvider
+    Run Get-IPAllowListProvidersConfig
+    Run Get-IPBlockListConfig
+    Run Get-IPBlockListEntry -Servers:($directAccessServers | Where-Object { $_.IsE14OrLater -and $_.IsHubTransportServer })
+    Run Get-IPBlockListProvider
+    Run Get-IPBlockListProvidersConfig
+    Run Get-JournalRule
+    Run Get-RecipientFilterConfig
+    Run Get-RMSTemplate
+    Run Get-SenderFilterConfig
+    Run Get-SenderIdConfig
+    Run Get-SenderReputationConfig
+    Run Get-TransportRule
+    # these cmdlets are meant to run locally and don't have Server specifiers (-Server, -Identity)
+    #Run Get-TransportAgent
+    #Run Get-TransportPipeline
 
-Write-Log "Transport done"
+    Write-Log "Transport done"
 
-# AD Setting
-Write-Progress -Activity:$collectionActivity -Status:"AD Settings" -PercentComplete:30
-Run Get-ADSite
-Run Get-AdSiteLink
+    # AD Setting
+    Write-Progress -Activity:$collectionActivity -Status:"AD Settings" -PercentComplete:30
+    Run Get-ADSite
+    Run Get-AdSiteLink
 
-Run Get-ExchangeAssistanceConfig
+    Run Get-ExchangeAssistanceConfig
 
-# AddressBook
-Run Get-GlobalAddressList
-Run Get-AddressList
-Run Get-AddressBookPolicy
+    # AddressBook
+    Run Get-GlobalAddressList
+    Run Get-AddressList
+    Run Get-AddressBookPolicy
 
-# Retention
-Run Get-RetentionPolicy
-Run Get-RetentionPolicyTag
-Write-Log "AD AddressBook Retention Done"
+    # Retention
+    Run Get-RetentionPolicy
+    Run Get-RetentionPolicyTag
+    Write-Log "AD AddressBook Retention Done"
 
-# Server Settings
-Write-Progress -Activity $collectionActivity -Status:"Server Settings" -PercentComplete:40
-Run Get-ExchangeServer
-Run Get-MailboxServer
+    # Server Settings
+    Write-Progress -Activity $collectionActivity -Status:"Server Settings" -PercentComplete:40
+    Run Get-ExchangeServer
+    Run Get-MailboxServer
 
-# For CAS (>= E14) in DAS list, include ASA info
-Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object {$_.IsDirectAccess -and $_.IsClientAccessServer -and -$_.IsE14OrLater}) -Identifier:Identity -RemoveDuplicate -PassThru |
+    # For CAS (>= E14) in DAS list, include ASA info
+    Run "Get-ClientAccessServer -IncludeAlternateServiceAccountCredentialStatus -WarningAction:SilentlyContinue" -Servers:($allExchangeServers | Where-Object { $_.IsDirectAccess -and $_.IsClientAccessServer -and - $_.IsE14OrLater }) -Identifier:Identity -RemoveDuplicate -PassThru |
     Run "Get-ClientAccessServer -WarningAction:SilentlyContinue" -Identifier:Identity -RemoveDuplicate
 
-Run Get-ClientAccessArray
-Run Get-RpcClientAccess
-Run "Get-TransportServer -WarningAction:SilentlyContinue"
-Run Get-TransportService
-Run Get-FrontendTransportService
-Run Get-ExchangeDiagnosticInfo -Servers $directAccessServers
-Run Get-ExchangeServerAccessLicense
+    Run Get-ClientAccessArray
+    Run Get-RpcClientAccess
+    Run "Get-TransportServer -WarningAction:SilentlyContinue"
+    Run Get-TransportService
+    Run Get-FrontendTransportService
+    Run Get-ExchangeDiagnosticInfo -Servers $directAccessServers
+    Run Get-ExchangeServerAccessLicense
 
-Run Get-PopSettings -Servers:$allExchangeServers
-Run Get-ImapSettings -Servers:$allExchangeServers
+    Run Get-PopSettings -Servers:$allExchangeServers
+    Run Get-ImapSettings -Servers:$allExchangeServers
 
-Write-Log "Server Done"
+    Write-Log "Server Done"
 
-# Database
-Write-Progress -Activity $collectionActivity -Status:"Database Settings" -PercentComplete:50
+    # Database
+    Write-Progress -Activity $collectionActivity -Status:"Database Settings" -PercentComplete:50
 
-Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
+    Run "Get-MailboxDatabase -Status -IncludePreExchange" -Servers:($allExchangeServers | Where-Object { $_.IsMailboxServer -and $_.IsDirectAccess }) -RemoveDuplicate -PassThru |
     Run "Get-MailboxDatabase -IncludePreExchange" -RemoveDuplicate
 
-Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object {$_.IsMailboxServer -and $_.IsDirectAccess}) -RemoveDuplicate -PassThru |
+    Run "Get-PublicFolderDatabase -Status" -Servers:($allExchangeServers | Where-Object { $_.IsMailboxServer -and $_.IsDirectAccess }) -RemoveDuplicate -PassThru |
     Run "Get-PublicFolderDatabase" -RemoveDuplicate
 
-Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater -and $_.IsMailboxServer})
-Run Get-DAG
-Run Get-DatabaseAvailabilityGroupConfiguration
-if (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction:SilentlyContinue) {
-    Run "Get-DatabaseAvailabilityGroupNetwork -ErrorAction:SilentlyContinue" -Servers:(Get-DatabaseAvailabilityGroup) -Identifier:'Identity'
-}
-Write-Log "Database Done"
+    Run Get-MailboxDatabaseCopyStatus -Servers:($directAccessServers | Where-Object { $_.IsE14OrLater -and $_.IsMailboxServer })
+    Run Get-DAG
+    Run Get-DatabaseAvailabilityGroupConfiguration
+    if (Get-Command Get-DatabaseAvailabilityGroup -ErrorAction:SilentlyContinue) {
+        Run "Get-DatabaseAvailabilityGroupNetwork -ErrorAction:SilentlyContinue" -Servers:(Get-DatabaseAvailabilityGroup) -Identifier:'Identity'
+    }
+    Write-Log "Database Done"
 
-# Virtual Directories
-Write-Progress -Activity $collectionActivity -Status:"Virtual Directory Settings" -PercentComplete:60
-Run 'Get-VirtualDirectory'
-Run "Get-IISWebBinding" -Servers $directAccessServers -PassThru | Save-Object -Name WebBinding
+    # Virtual Directories
+    Write-Progress -Activity $collectionActivity -Status:"Virtual Directory Settings" -PercentComplete:60
+    Run 'Get-VirtualDirectory'
+    Run "Get-IISWebBinding" -Servers $directAccessServers -PassThru | Save-Object -Name WebBinding
 
-# Active Monitoring & Managed Availability
-Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:70
-Run Get-GlobalMonitoringOverride
-Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater})
-Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
-# Heath-related command are now commented out since rarely needed.
-# Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
-# Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
-# Run Test-ServiceHealth -Servers:$directAccessServers
+    # Active Monitoring & Managed Availability
+    Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:70
+    Run Get-GlobalMonitoringOverride
+    Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object { $_.IsE15OrLater })
+    Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object { $_.IsE15OrLater }) -Identifier:Identity
+    # Heath-related command are now commented out since rarely needed.
+    # Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
+    # Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
+    # Run Test-ServiceHealth -Servers:$directAccessServers
 
-# Federation & Hybrid
-Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:75
-Run Get-SharingPolicy
-Run Get-HybridConfiguration
-Run Get-FederationTrust
-Run Get-FederatedOrganizationIdentifier
-#Run Get-FederationInformation
-#Run Get-FederatedDomainProof
-Run "Get-IntraOrganizationConfiguration -WarningAction:SilentlyContinue"
-Run Get-IntraOrganizationConnector
-Run Get-InboundConnector
-Run Get-OutboundConnector
+    # Federation & Hybrid
+    Write-Progress -Activity $collectionActivity -Status:"Monitoring Settings" -PercentComplete:75
+    Run Get-SharingPolicy
+    Run Get-HybridConfiguration
+    Run Get-FederationTrust
+    Run Get-FederatedOrganizationIdentifier
+    #Run Get-FederationInformation
+    #Run Get-FederatedDomainProof
+    Run "Get-IntraOrganizationConfiguration -WarningAction:SilentlyContinue"
+    Run Get-IntraOrganizationConnector
+    Run Get-InboundConnector
+    Run Get-OutboundConnector
 
-# Exchange Certificate
-Write-Progress -Activity $collectionActivity -Status:"Exchange Certificate" -PercentComplete:80
-Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object {$_.IsE14OrLater})
+    # Exchange Certificate
+    Write-Progress -Activity $collectionActivity -Status:"Exchange Certificate" -PercentComplete:80
+    Run Get-ExchangeCertificate -Servers:($directAccessServers | Where-Object { $_.IsE14OrLater })
 
-# Throttling
-Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
-Run Get-ThrottlingPolicy
-# Run 'Get-ThrottlingPolicyAssociation -ResultSize 1000'
+    # Throttling
+    Write-Progress -Activity $collectionActivity -Status:"Throttling" -PercentComplete:85
+    Run Get-ThrottlingPolicy
+    # Run 'Get-ThrottlingPolicyAssociation -ResultSize 1000'
 
-# misc
-Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
-Run Get-MigrationConfig
-Run Get-MigrationEndpoint
-Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity
-# Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine # skipping, because gwmi Win32_Process is collected (see WMI section)
-Run Get-OutlookProtectionRule
-Run Get-PolicyTipConfig
-Run Get-RbacDiagnosticInfo
-Run Get-RoleAssignmentPolicy
-# RBAC roles & assignments are skippped for now (can be included in future if necessary)
-# Run Get-ManagementRole
-# Run Get-ManagementRoleAssignment
-# Run Get-ManagementScope
+    # misc
+    Write-Progress -Activity $collectionActivity -Status:"Misc" -PercentComplete:85
+    Run Get-MigrationConfig
+    Run Get-MigrationEndpoint
+    Run Get-NetworkConnectionInfo -Servers:$directAccessServers -Identifier:Identity
+    # Run Get-ProcessInfo -Servers:$directAccessServers -Identifier:TargetMachine # skipping, because gwmi Win32_Process is collected (see WMI section)
+    Run Get-OutlookProtectionRule
+    Run Get-PolicyTipConfig
+    Run Get-RbacDiagnosticInfo
+    Run Get-RoleAssignmentPolicy
+    # RBAC roles & assignments are skippped for now (can be included in future if necessary)
+    # Run Get-ManagementRole
+    # Run Get-ManagementRoleAssignment
+    # Run Get-ManagementScope
 
-Run Get-SearchDocumentFormat
-# Run Get-MailboxAuditBypassAssociation # skipping this because it takes time but rarely needed.
-Run Get-SettingOverride
-Run "Get-Mailbox -Arbitration" -PassThru | Save-Object -Name 'Mailbox-Arbitration'
-Run "Get-Mailbox -Monitoring" -PassThru | Save-Object -Name 'Mailbox-Monitoring'
-Run "Get-Mailbox -PublicFolder" -PassThru | Save-Object -Name 'Mailbox-PublicFolder'
-Run Get-UMService
+    Run Get-SearchDocumentFormat
+    # Run Get-MailboxAuditBypassAssociation # skipping this because it takes time but rarely needed.
+    Run Get-SettingOverride
+    Run "Get-Mailbox -Arbitration" -PassThru | Save-Object -Name 'Mailbox-Arbitration'
+    Run "Get-Mailbox -Monitoring" -PassThru | Save-Object -Name 'Mailbox-Monitoring'
+    Run "Get-Mailbox -PublicFolder" -PassThru | Save-Object -Name 'Mailbox-PublicFolder'
+    Run Get-UMService
 
-# FIPS
-Run Get-MalwareFilteringServer
-Run Get-MalwareFilterPolicy
-Run Get-MalwareFilterRule
-if ($IncludeFIPS) {
-    Write-Progress -Activity $collectionActivity -Status:"FIPS" -PercentComplete:85
-    Invoke-FIPS -Servers ($directAccessServers | Where-Object {$_.IsE15OrLater -and $_.IsHubTransportServer})
-}
+    # FIPS
+    Run Get-MalwareFilteringServer
+    Run Get-MalwareFilterPolicy
+    Run Get-MalwareFilterRule
+    if ($IncludeFIPS) {
+        Write-Progress -Activity $collectionActivity -Status:"FIPS" -PercentComplete:85
+        Invoke-FIPS -Servers ($directAccessServers | Where-Object { $_.IsE15OrLater -and $_.IsHubTransportServer })
+    }
 
-Run Get-HostedConnectionFilterPolicy
-Run Get-HostedContentFilterPolicy
-Run Get-HostedContentFilterRule
-Run Get-AntiPhishPolicy
-Run Get-AntiPhishRule
-Run "Get-PhishFilterPolicy -SpoofAllowBlockList -Detailed"
+    Run Get-HostedConnectionFilterPolicy
+    Run Get-HostedContentFilterPolicy
+    Run Get-HostedContentFilterRule
+    Run Get-AntiPhishPolicy
+    Run Get-AntiPhishRule
+    Run "Get-PhishFilterPolicy -SpoofAllowBlockList -Detailed"
 
-# .NET Framework Versions
-Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server
+    # .NET Framework Versions
+    Run Get-DotNetVersion -Servers:($directAccessServers) -Identifier:Server
 
-# TLS Settings
-Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server
+    # TLS Settings
+    Run Get-TlsRegistry -Servers $directAccessServers -Identifier:Server
 
-# TCPIP6
-Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server
+    # TCPIP6
+    Run Get-TCPIP6Registry -Servers $directAccessServers -Identifier:Server
 
-# MSInfo32
-# Get-MSInfo32 -Servers $directAccessServers
+    # MSInfo32
+    # Get-MSInfo32 -Servers $directAccessServers
 
-Run Get-ProxySetting -Servers $directAccessServers
-Run Get-NetworkInterface -Server $directAccessServers
+    Run Get-ProxySetting -Servers $directAccessServers
+    Run Get-NetworkInterface -Server $directAccessServers
 
-# WMI
-# Win32_powerplan is available in Win7 & above.
-Run 'Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PowerPlan
-Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PageFileSetting
-Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_ComputerSystem
-Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_OperatingSystem
-Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -PassThru |
-    Where-Object {$_.IPEnabled} | Save-Object -Name Win32_NetworkAdapterConfiguration
-Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
+    # WMI
+    # Win32_powerplan is available in Win7 & above.
+    Run 'Get-WmiObject -Namespace root\cimv2\power -Class Win32_PowerPlan' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PowerPlan
+    Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PageFileSetting
+    Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_ComputerSystem
+    Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_OperatingSystem
+    Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -PassThru |
+    Where-Object { $_.IPEnabled } | Save-Object -Name Win32_NetworkAdapterConfiguration
+    Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
 
-# Get Exsetup version
-Run "Get-ExSetupVersion" -Servers $directAccessServers
+    # Get Exsetup version
+    Run "Get-ExSetupVersion" -Servers $directAccessServers
 
-Run Get-SmbConfig -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
-Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
-Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers
-Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
-# Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
+    Run Get-SmbConfig -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
+    Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
+    Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers
+    Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
+    # Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
 
-if ($IsExchangeOnline) {
-    Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
-}
-else {
-    Run "Get-SPN -Path:$Path"
-
-    # Ldife for Exchange Org
-    Write-Progress -Activity $collectionActivity -Status:"Running Ldifde" -PercentComplete:90
-    Run "Invoke-Ldifde -Path:$Path"
-}
-
-# Collect EventLogs
-if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
-    Write-Progress -Activity $collectionActivity -Status:"Event Logs" -PercentComplete:90
-
-    $eventLogPath = Join-Path $Path -ChildPath 'EventLog'
-    if ($IncludeEventLogsWithCrimson) {
-        Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers
+    if ($IsExchangeOnline) {
+        Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
     }
     else {
-        Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers
+        Run "Get-SPN -Path:$Path"
+
+        # Ldife for Exchange Org
+        Write-Progress -Activity $collectionActivity -Status:"Running Ldifde" -PercentComplete:90
+        Run "Invoke-Ldifde -Path:$Path"
     }
-}
 
-# Collect Perfmon Log
-if ($IncludePerformanceLog) {
-    Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
-    Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
-}
+    # Collect EventLogs
+    if ($IncludeEventLogs -or $IncludeEventLogsWithCrimson) {
+        Write-Progress -Activity $collectionActivity -Status:"Event Logs" -PercentComplete:90
 
-# Collect IIS Log
-if ($IncludeIISLog) {
-    Write-Progress -Activity $collectionActivity -Status:"IIS Log" -PercentComplete:90
-    Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
-    Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
-}
-
-# Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
-foreach ($logType in $IncludeExchangeLog) {
-    if (-not $logType) { continue } # With PowerShellv2, $null is iterated.
-    Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
-    Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
-}
-
-# Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
-if ($IncludeTransportLog.Count) {
-    Write-Progress -Activity $collectionActivity -Status:"Transport Logs" -PercentComplete:90
-    Run "Save-TransportLog -Path:`"$(Join-Path $Path 'TransportLog')`" -Type:$($IncludeTransportLog -join ',') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
-}
-
-# Collect Exchange Setup logs (Currently not used. If there's any demand, activate it)
-if ($IncludeExchangeSetupLog) {
-    Write-Progress -Activity $collectionActivity -Status:"Exchange Setup Logs" -PercentComplete:90
-    Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers
-}
-
-# Collect Fast Search ULS logs
-if ($IncludeFastSearchLog) {
-    Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
-    Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearchLog) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
-}
-
-# Save errors
-if ($Script:errs.Count) {
-    $errPath = Join-Path $Path -ChildPath "Error"
-    if (-not (Test-Path errPath)) {
-        New-Item $errPath -ItemType Directory -ErrorAction Stop | Out-Null
+        $eventLogPath = Join-Path $Path -ChildPath 'EventLog'
+        if ($IncludeEventLogsWithCrimson) {
+            Run "Save-ExchangeEventLog -Path:$eventLogPath -IncludeCrimsonLogs" -Servers $directAccessServers
+        }
+        else {
+            Run "Save-ExchangeEventLog -Path $eventLogPath" -Servers $directAccessServers
+        }
     }
-    $Script.errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
-}
 
-$allDone = $true
+    # Collect Perfmon Log
+    if ($IncludePerformanceLog) {
+        Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
+        Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
+    }
+
+    # Collect IIS Log
+    if ($IncludeIISLog) {
+        Write-Progress -Activity $collectionActivity -Status:"IIS Log" -PercentComplete:90
+        Run "Save-IISLog -Path:$(Join-Path $Path 'IISLog') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+        Run "Save-HttpErr -Path:$(Join-Path $Path 'HTTPERR') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+    }
+
+    # Collect Exchange logs (e.g. HttpProxy, Ews, Rpc Client Access, etc.)
+    foreach ($logType in $IncludeExchangeLog) {
+        if (-not $logType) { continue } # With PowerShellv2, $null is iterated.
+        Write-Progress -Activity $collectionActivity -Status:"$logType Logs" -PercentComplete:90
+        Run "Save-ExchangeLogging -Path:`"$(Join-Path $Path $logType)`" -FolderPath '$logType' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+    }
+
+    # Collect Transport logs (e.g. Connectivity, MessageTracking etc.)
+    if ($IncludeTransportLog.Count) {
+        Write-Progress -Activity $collectionActivity -Status:"Transport Logs" -PercentComplete:90
+        Run "Save-TransportLog -Path:`"$(Join-Path $Path 'TransportLog')`" -Type:$($IncludeTransportLog -join ',') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+    }
+
+    # Collect Exchange Setup logs (Currently not used. If there's any demand, activate it)
+    if ($IncludeExchangeSetupLog) {
+        Write-Progress -Activity $collectionActivity -Status:"Exchange Setup Logs" -PercentComplete:90
+        Run "Save-ExchangeSetupLog -Path:$(Join-Path $Path 'ExchangeSetupLog')" -Servers $directAccessServers
+    }
+
+    # Collect Fast Search ULS logs
+    if ($IncludeFastSearchLog) {
+        Write-Progress -Activity $collectionActivity -Status:"FastSearch Logs" -PercentComplete:90
+        Run "Save-FastSearchLog -Path:$(Join-Path $Path FastSearchLog) -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $directAccessServers
+    }
+
+    # Save errors
+    if ($Script:errs.Count) {
+        $errPath = Join-Path $Path -ChildPath "Error"
+        if (-not (Test-Path errPath)) {
+            New-Item $errPath -ItemType Directory -ErrorAction Stop | Out-Null
+        }
+        $Script.errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
+    }
+
+    $allDone = $true
 } # end of try for transcript
 finally {
     Remove-Runspace
