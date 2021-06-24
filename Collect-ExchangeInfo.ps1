@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-05-14"
+$version = "2021-06-24"
 #requires -Version 2.0
 
 <#
@@ -823,7 +823,7 @@ function Save-Item {
                     $ProgressPreference = 'SilentlyContinue'
                 }
 
-                & $compress @compressArgs
+                & ([ScriptBlock]::Create($compress)) @compressArgs
             } -ArgumentList ${function:Compress-Folder}, $compressArgs, $ShowProgress
         ) 2>&1
     }
