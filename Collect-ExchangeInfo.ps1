@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-06-24"
+$version = "2021-07-02"
 #requires -Version 2.0
 
 <#
@@ -2042,16 +2042,14 @@ function Save-ExchangeEventLog {
     }
 
     Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $Server ..."
-    # By default, collect app and sys logs
-    $logs = "Application", "System"
 
-    # Add crimson logs if requested
-    if ($IncludeCrimsonLogs) {
-        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Exchange*'
-
-        # This is for the FAST Search.
-        $logs += (wevtutil el /r:$Server) -like 'Microsoft-Office Server*'
-    }
+    $logs = @(
+        # By default, collect app and sys logs and add crimson logs if requested
+        "Application", "System" 
+        if ($IncludeCrimsonLogs) {
+            wevtutil el /r:$Server | Where-Object { $_ -eq 'MSExchange Management' -or $_ -like 'Microsoft-Exchange*' -or $_ -like 'Microsoft-Office Server*' }
+        }
+    )
 
     foreach ($log in $logs) {
         # Export event logs to Windows' temp folder
