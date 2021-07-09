@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-07-02"
+$version = "2021-07-10"
 #requires -Version 2.0
 
 <#
@@ -2831,14 +2831,18 @@ function Get-InstalledUpdate {
             $items = $appUpdates.Items()
 
             foreach ($item in $items) {
+                # Raw installedOn includes 0x0e20 (0x200E Left-to-Right char). Remove them.
+                $installedOnRaw = $appUpdates.GetDetailsOf($item, 12)
+                $installedOn = New-Object string -ArgumentList (, $($installedOnRaw.ToCharArray() | Where-Object { $_ -lt 128 }))
+
                 # https://docs.microsoft.com/en-us/windows/win32/shell/folder-getdetailsof
-                New-Object PSCustomObject -Property @{
+                [PSCustomObject]@{
                     Name        = $item.Name
                     Program     = $appUpdates.GetDetailsOf($item, 2)
                     Version     = $appUpdates.GetDetailsOf($item, 3)
                     Publisher   = $appUpdates.GetDetailsOf($item, 4)
                     URL         = $appUpdates.GetDetailsOf($item, 7)
-                    InstalledOn = $appUpdates.GetDetailsOf($item, 12)
+                    InstalledOn = $installedOn
                 }
                 [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($item) | Out-Null
             }
@@ -3419,7 +3423,7 @@ try {
     Run Get-FipsAlgorithmPolicy -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
     Run "Save-AppConfig -Path $(Join-Path $Path 'AppConfig')" -Servers $directAccessServers
     Run Get-UnifiedContent -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
-    # Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object {$_.IsE15OrLater})
+    Run Get-InstalledUpdate -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
 
     if ($IsExchangeOnline) {
         Write-Log "Skipping Get-SPN & Invoke-Ldifde since this is an Exchange Online Organization"
