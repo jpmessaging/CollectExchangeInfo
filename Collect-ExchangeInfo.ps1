@@ -3133,7 +3133,7 @@ Write-Log "directAccessCandidates = $directAccessCandidates"
 # Since there shouldn't be anything blocking communication b/w Exchange Servers, we should be able to use ICMP
 $directAccessServers = @(
     foreach ($server in $directAccessCandidates) {
-        if (Test-Connection -ComputerName:$server.Name -Count 1 -Quiet) {
+        if ($server.Name -eq $env:COMPUTERNAME -or (Test-Connection -ComputerName:$server.Name -Count 1 -Quiet)) {
             $server
         }
         else {
