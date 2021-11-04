@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-07-10"
+$version = "2021-09-26"
 #requires -Version 2.0
 
 <#
@@ -793,6 +793,8 @@ function Save-Item {
     else {
         $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
     }
+
+    Write-Log "[Save-Item] Source: $Path, Destination: $Destination"
 
     $serverAndPath = ConvertFrom-UNCPath $Path.ToString()
     $server = $serverAndPath.Server
@@ -2045,7 +2047,7 @@ function Save-ExchangeEventLog {
 
     $logs = @(
         # By default, collect app and sys logs and add crimson logs if requested
-        "Application", "System" 
+        "Application", "System"
         if ($IncludeCrimsonLogs) {
             wevtutil el /r:$Server | Where-Object { $_ -eq 'MSExchange Management' -or $_ -like 'Microsoft-Exchange*' -or $_ -like 'Microsoft-Office Server*' }
         }
@@ -2056,8 +2058,10 @@ function Save-ExchangeEventLog {
         Write-Log "[$($MyInvocation.MyCommand)] Saving $log ..."
         $fileName = $log.Replace('/', '_') + '.evtx'
         $localFilePath = [IO.Path]::Combine($winTempEventPath, $fileName)
-        wevtutil epl $log $localFilePath /ow /r:$Server
-        wevtutil al $localFilePath /r:$Server
+        wevtutil export-log $log $localFilePath /ow /r:$Server
+        wevtutil archive-log $localFilePath /r:$Server
+        # wevtutil archive-log $localFilePath /locale:en-us /r:$Server
+        # wevtutil archive-log $localFilePath /locale:ja-jp /r:$Server
     }
 
     Save-Item -Path $uncWinTempEventPath -Destination $destination
@@ -2791,7 +2795,7 @@ function Save-AppConfig {
 
     $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     $uncExchangePath = ConvertTo-UNCPath -Server $Server -Path $exchangePath
-    Save-Item -Path $uncExchangePath -Destination $Folder -Filter '*.exe.config', 'web.config'
+    Save-Item -Path $uncExchangePath -Destination $Folder -Filter '*.config', 'web.config'
 
     # $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     # $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
@@ -2992,6 +2996,12 @@ function Invoke-AutoUpdate {
 <#
   Main
 #>
+
+# Explicitly check admin rights
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Warning "Please run as administrator."
+    return
+}
 
 # This is just for testing.
 $TrustAllCertificatePolicyDefinition = @"
