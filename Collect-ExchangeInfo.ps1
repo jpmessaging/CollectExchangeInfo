@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-09-26"
+$version = "2021-11-06"
 #requires -Version 2.0
 
 <#
@@ -1629,7 +1629,8 @@ function Run {
             for ($i = 0; $i -lt $temp.Count; ++$i) {
                 try {
                     # If GetType() fails, most likely this type is not CLS-compliant
-                    $temp[$i].GetType() | Out-Null
+                    # Note: Do not pipe the result of GetType() to Out-Null. After 2021 Nov SU (KB5007409), that hangs PowerShell.
+                    $discard = $temp[$i].GetType()
                 }
                 catch {
                     Write-Log "$Command returned a non-CLS-compliant type"
