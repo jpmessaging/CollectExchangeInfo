@@ -1,54 +1,57 @@
 ## 概要
+
 Collect-ExchangeInfo.ps1 は、様々な Exchange サーバーに関する構成情報を取得し、指定したパスにログ ファイルを出力します。設定変更などは実施しません。
 
 詳細については、スクリプトのコメント ベースのヘルプを参照ください。
 
-
 ## 利用方法
+
 1. Collect-ExchangeInfo.ps1 をダウンロードし、ブロックを解除します。
 
-    [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2021-09-26/Collect-ExchangeInfo.ps1)
+   [ダウンロード](https://github.com/jpmessaging/CollectExchangeInfo/releases/download/v2021-11-16/Collect-ExchangeInfo.ps1)
 
-   1. ファイルを右クリックして、プロパティを開きます  
+   1. ファイルを右クリックして、プロパティを開きます
    2. [全般] タブにて、「このファイルは他のコンピューターから取得したものです。このコンピューターを保護するため、このファイルへのアクセスはブロックされる可能性があります。」というメッセージが表示されている場合には、[許可する] にチェックを入れます。
 
 2. Exchange サーバー上に Collect-ExchangeInfo.ps1 をコピーします。
 
-    本スクリプトは Active Directory 上の構成情報、そして Servers パラメーターで指定したサーバー上の情報を取得するものであるため、各サーバーで実施いただく必要はありません。任意のサーバー (※) で一度のみ実施ください。
+   本スクリプトは Active Directory 上の構成情報、そして Servers パラメーターで指定したサーバー上の情報を取得するものであるため、各サーバーで実施いただく必要はありません。任意のサーバー (※) で一度のみ実施ください。
 
-    ※ 異なるバージョンの Exchange サーバーが混在する環境においては、最も新しいバージョンのサーバーで実行ください (例: Exchange 2013 と Exchange 2010 の混在環境の場合には、Exchange 2013 サーバーで実行ください)。
+   ※ 異なるバージョンの Exchange サーバーが混在する環境においては、最も新しいバージョンのサーバーで実行ください (例: Exchange 2013 と Exchange 2010 の混在環境の場合には、Exchange 2013 サーバーで実行ください)。
 
 3. 管理者権限で Exchange 管理シェルを起動します。
 4. スクリプトを実行します。
 
-    採取する対象サーバーやパラメータについてはエンジニアからの案内をご確認ください。
+   採取する対象サーバーやパラメータについてはエンジニアからの案内をご確認ください。
 
-    ```PowerShell
-    .\Collect-ExchangeInfo.ps1 -Path <出力先フォルダー パス> -Servers:<マシン固有情報を採取する対象のサーバー>
-    ```
+   ```PowerShell
+   .\Collect-ExchangeInfo.ps1 -Path <出力先フォルダー パス> -Servers:<マシン固有情報を採取する対象のサーバー>
+   ```
 
-    例: 
-    ```PowerShell
-    C:\Script>.\Collect-ExchangeInfo.ps1 -Path C:\Script\logs -Servers:ex01,ex02 -IncludeEventLogs 
-    ```
+   例:
 
-スクリプトが終了すると、"<組織名_採取日時>.zip" が出力されます。こちらの ZIP ファイルを弊社までお寄せください。
+   ```PowerShell
+   C:\Script>.\Collect-ExchangeInfo.ps1 -Path C:\Script\logs -Servers:ex01,ex02 -IncludeEventLogs
+   ```
 
+スクリプトが終了すると、"<組織名\_採取日時>.zip" が出力されます。こちらの ZIP ファイルを弊社までお寄せください。
 
 ## 実行例
+
 1.  Active Directory 上の構成情報のみを取得します。
 
     ```PowerShell
     .\Collect-ExchangeInfo.ps1 -Path C:\exinfo
     ```
-  
-2. Active Directory 上の構成情報に加えて、名前が "EX-*" にマッチするサーバーについてはそのサーバー固有の情報と、イベントログ (Exchange のクリムゾン ログ含む) を取得します。  
+
+2.  Active Directory 上の構成情報に加えて、名前が "EX-\*" にマッチするサーバーについてはそのサーバー固有の情報と、イベントログ (Exchange のクリムゾン ログ含む) を取得します。
 
     ```PowerShell
     .\Collect-ExchangeInfo.ps1 -Path C:\exinfo -Servers:EX-* -IncludeEventLogsWithCrimson
     ```
 
 ## ライセンス
+
 Copyright (c) 2020 Ryusuke Fujita
 
 This software is released under the MIT License.  
