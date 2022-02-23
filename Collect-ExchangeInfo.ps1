@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2021-11-16"
+$version = "2022-01-18"
 #requires -Version 2.0
 
 <#
@@ -2779,35 +2779,24 @@ function Save-AppConfig {
         $Server
     )
 
-    $exServer = $Script:allExchangeServers | Where-Object { $_.Name -eq $Server }
-    if (-not $exServer) {
-        $exServer = Get-ExchangeServer $Server
-    }
+    $destination = [IO.Path]::Combine($Path, $Server)
+    $inetsrvDestination = [IO.Path]::Combine($destination, 'inetsrv')
 
-    # if (-not $exServer.IsHubTransportServer) {
-    #     Write-Log "Skipping $Server because this is not a HubTransportServer."
-    #     return
-    # }
-
-    $Folder = Join-Path $Path $Server
-    if (-not (Test-Path $Folder)) {
-        New-Item -ItemType Directory $Folder | Out-Null
+    if (-not (Test-Path $destination)) {
+        New-Item -ItemType Directory $destination | Out-Null
+        New-Item -ItemType Directory $inetsrvDestination | Out-Null
     }
 
     $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
     $uncExchangePath = ConvertTo-UNCPath -Server $Server -Path $exchangePath
-    Save-Item -Path $uncExchangePath -Destination $Folder -Filter '*.config', 'web.config'
+    Save-Item -Path $uncExchangePath -Destination $destination -Filter '*.config'
 
-    # $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
-    # $binFolder = [IO.Path]::Combine($exchangePath, 'bin')
-    # $binFolderUNC = ConvertTo-UNCPath -Server $Server -Path $binFolder
-
-    # Save-Item -SourcePath $binFolderUNC -DestinationPath $Folder -Filter '*.exe.config' # -SkipZip
-
-    # For now, web config files are not included.
-    # $casFolder = [IO.Path]::Combine($exchangePath, 'ClientAccess')
-    # $casFolderUNC = ConvertTo-UNCPath -Server $Server -Path $casFolder
-    # Save-Item -SourcePath $casFolderUNC -DestinationPath (Join-Path $Folder 'ClientAccess') -Filter 'web.config' -SkipZip
+    # Save IIS applicationConfig (usually at "C:\Windows\System32\inetsrv\config\applicationHost.config")
+    $winTempPath = Get-WindowsTempFolder -Server $Server
+    $systemRoot = $winTempPath.SubString(0, $winTempPath.IndexOf('temp', 0, [StringComparison]::OrdinalIgnoreCase))
+    $inetPath = [IO.Path]::Combine($systemRoot, 'System32\inetsrv\config')
+    $uncInetPath = ConvertTo-UNCPath -Server $Server -Path $inetPath
+    Save-Item -Path $uncInetPath -Destination $inetsrvDestination -Filter '*.config'
 }
 
 function Get-InstalledUpdate {
