@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-01-18"
+$version = "2022-03-03"
 #requires -Version 2.0
 
 <#
@@ -740,6 +740,37 @@ function ConvertTo-UNCPath {
         $Server
     )
 
+    if (-not $Script:MappedDriveCache) {
+        $Script:MappedDriveCache = @{}
+    }
+
+    $drive = $Path.Substring(0, 2)
+    $cacheKey = "$Server\$drive"
+    $mappedDiskRootPath = $null
+
+    if ($Script:MappedDriveCache.ContainsKey($cacheKey)) {
+        $mappedDiskRootPath = $Script:MappedDriveCache[$cacheKey]
+    }
+    else {
+        # Check network drive
+        $drive = $Path.Substring(0, 2)
+        $err = $($mappedDisk = Get-WmiObject -ComputerName $Server -ClassName 'Win32_MappedLogicalDisk' -Filter "Name = '$drive'") 2>&1
+
+        if ($err) {
+            Write-Log "[$($MyInvocation.MyCommand)] Get-WmiObject Win32_MappedLogicalDisk failed for Server $Server's drive $drive. $err"
+        }
+        elseif ($mappedDisk) {
+            $mappedDiskRootPath = $mappedDisk.ProviderName
+            $Script:MappedDriveCache.Add($cacheKey, $mappedDiskRootPath)
+            Write-Log "[$($MyInvocation.MyCommand)] Server $Server's drive $drive is mapped to $mappedDiskRootPath."
+        }
+    }
+
+    if ($mappedDiskRootPath) {
+        return Join-Path $mappedDiskRootPath $Path.Substring(3)
+    }
+
+    $Script:MappedDriveCache.Add($cacheKey, "\\$Server\$($drive.Replace(':', '$'))")
     "\\$Server\$($Path.Replace(':', '$'))"
 }
 
