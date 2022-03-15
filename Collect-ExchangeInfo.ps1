@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-03-07"
+$version = "2022-03-14"
 #requires -Version 2.0
 
 <#
@@ -323,6 +323,8 @@ function Compress-Folder {
             $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
 
+        $sortedFiles = @($files | Sort-Object -Property 'LastWriteTime')
+
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
             $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
         }
@@ -336,7 +338,9 @@ function Compress-Folder {
 
         # If there are no files after filters are applied, bail.
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            $oldest = $sortedFiles[0]
+            $newest = $sortedFiles[-1]
+            Write-Error "[$($MyInvocation.MyCommand)] There are no files after filters are applied. Server: $env:COMPUTERNAME, Path: $Path, Filter: $Filter, FromDateTime: $($FromDateTime.ToUniversalTime().ToString('o')), ToDateTime: $($ToDateTime.ToUniversalTime().ToString('o')); File Count: $($sortedFiles.Count);$(if ($sortedFiles.Count -gt 0) { " Oldest: $($oldest.Name), $($oldest.LastWriteTime.ToUniversalTime().ToString('o')); Newest: $($newest.Name), $($newest.LastWriteTime.ToUniversalTime().ToString('o'))"})"
             return
         }
 
@@ -825,7 +829,7 @@ function Save-Item {
         $Destination = New-Item $Destination -ItemType Directory -ErrorAction Stop | Select-Object -ExpandProperty FullName
     }
 
-    Write-Log "[Save-Item] Source: $Path, Destination: $Destination"
+    Write-Log "[$($MyInvocation.MyCommand)] Source: $Path, Destination: $Destination"
 
     $serverAndPath = ConvertFrom-UNCPath $Path.ToString()
     $server = $serverAndPath.Server
@@ -881,7 +885,7 @@ function Save-Item {
 
         # If it failed due to no files, there's no need to filter again. So just bail after re-writing the error.
         if ($archiveError -match 'no file') {
-            Write-Error -ErrorRecord $archiveError
+            $archiveError | ForEach-Object { Write-Error -ErrorRecord $_ }
             return
         }
 
@@ -892,6 +896,8 @@ function Save-Item {
         else {
             $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
+
+        $sortedFiles = $files | Sort-Object -Property 'LastWriteTime'
 
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
             $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
@@ -904,7 +910,9 @@ function Save-Item {
         $files = @($files | Group-Object -Property 'FullName' | ForEach-Object { $_.Group | Select-Object -First 1 })
 
         if ($files.Count -eq 0) {
-            Write-Error "There are no files after filters are applied. Server: $server, Path: $localPath, Filter: $Filter, FromDateTime: $FromDateTime, ToDateTime: $ToDateTime"
+            $oldest = $sortedFiles[0]
+            $newest = $sortedFiles[-1]
+            Write-Error "[$($MyInvocation.MyCommand)] There are no files after filters are applied. Server: $server, Path: $localPath, Filter: $Filter, FromDateTime: $($FromDateTime.ToUniversalTime().ToString('o')), ToDateTime: $($ToDateTime.ToUniversalTime().ToString('o')); File Count: $($sortedFiles.Count);$(if ($sortedFiles.Count -gt 0) { " Oldest: $($oldest.Name), $($oldest.LastWriteTime.ToUniversalTime().ToString('o')); Newest: $($newest.Name), $($newest.LastWriteTime.ToUniversalTime().ToString('o'))"})"
             return
         }
 
