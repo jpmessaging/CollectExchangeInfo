@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-03-14"
+$version = "2022-07-11"
 #requires -Version 2.0
 
 <#
@@ -205,7 +205,7 @@ function Save-Object {
                 }
             }
 
-            $objectList | Format-List * | Out-File ([IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
+            $objectList | Format-List * | Set-Content ([IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
         }
     }
 }
@@ -1248,13 +1248,13 @@ function Invoke-Ldifde {
     $stdOutput = Join-Path $resolvedPath -ChildPath "$fileNameWihtoutExtension.out"
 
     if ($port) {
-        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -s localhost -t $port -f `"$filePath`""
+        $result = Invoke-Executable -FileName 'ldifde' -Argument "-d `"$exorg`" -s localhost -t $port -f `"$filePath`""
     }
     else {
-        $result = Invoke-ShellCommand -FileName 'ldifde' -Argument "-d `"$exorg`" -f `"$filePath`""
+        $result = Invoke-Executable -FileName 'ldifde' -Argument "-d `"$exorg`" -f `"$filePath`""
     }
 
-    $result.StdOut | Out-File $stdOutput -Encoding utf8
+    $result.StdOut | Set-Content $stdOutput -Encoding utf8
 
     if ($result.ExitCode -ne 0) {
         throw "ldifde failed. exit code = $($result.ExitCode)."
@@ -1936,19 +1936,19 @@ function Get-SPN {
     try {
         $writer = [IO.File]::AppendText($filePath)
         $writer.WriteLine("[setspn -P -F -Q http/*]")
-        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q http/*'
+        $result = Invoke-Executable -FileName setspn -Argument '-P -F -Q http/*'
         $writer.WriteLine($result.StdOut)
 
         $writer.WriteLine("[setspn -P -F -Q exchangeMDB/*]")
-        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeMDB/*'
+        $result = Invoke-Executable -FileName setspn -Argument '-P -F -Q exchangeMDB/*'
         $writer.WriteLine($result.StdOut)
 
         $writer.WriteLine("[setspn -P -F -Q exchangeRFR/*]")
-        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeRFR/*'
+        $result = Invoke-Executable -FileName setspn -Argument '-P -F -Q exchangeRFR/*'
         $writer.WriteLine($result.StdOut)
 
         $writer.WriteLine("[setspn -P -F -Q exchangeAB/*]")
-        $result = Invoke-ShellCommand -FileName setspn -Argument '-P -F -Q exchangeAB/*'
+        $result = Invoke-Executable -FileName setspn -Argument '-P -F -Q exchangeAB/*'
         $writer.WriteLine($result.StdOut)
     }
     finally {
@@ -1958,7 +1958,7 @@ function Get-SPN {
     }
 }
 
-function Invoke-ShellCommand {
+function Invoke-Executable {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $True)]
@@ -3544,7 +3544,7 @@ finally {
         Write-Log "Script was interrupted in the middle of execution."
     }
 
-    Write-Log "Total time is $(((Get-Date) - $startDateTime).TotalSeconds) seconds"
+    Write-Log "Total time is $((Get-Date) - $startDateTime)."
     Close-Log
 
     # release transcript file even when script is stopped in the middle.
