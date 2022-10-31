@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-07-11"
+$version = "2022-10-30"
 #requires -Version 2.0
 
 <#
@@ -365,7 +365,7 @@ function Compress-Folder {
 
         $zipStream = $zipArchive = $null
         try {
-            New-Item $zipFilePath -ItemType file | Out-Null
+            $null = New-Item $zipFilePath -ItemType file
 
             $zipStream = New-Object System.IO.FileStream -ArgumentList $zipFilePath, ([IO.FileMode]::Open)
             $zipArchive = New-Object System.IO.Compression.ZipArchive -ArgumentList $zipStream, ([IO.Compression.ZipArchiveMode]::Create)
@@ -493,7 +493,7 @@ function Compress-Folder {
 
             # Copy filtered files to a temporary folder
             $tempPath = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName().Substring(0, 8))
-            New-Item $tempPath -ItemType Directory | Out-Null
+            $null = New-Item $tempPath -ItemType Directory
 
             foreach ($file in $files) {
                 $dest = $tempPath
@@ -501,7 +501,7 @@ function Compress-Folder {
                 if ($subPath) {
                     $dest = Join-Path $tempPath $subPath
                     if (-not (Test-Path -LiteralPath $dest)) {
-                        New-Item -ItemType Directory -Path $dest | Out-Null
+                        $null = New-Item -ItemType Directory -Path $dest
                     }
                 }
 
@@ -567,7 +567,7 @@ function Compress-Folder {
             Remove-Item -LiteralPath $tempPath -Force -Recurse
         }
 
-        [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shellApp) | Out-Null
+        $null = [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shellApp)
 
         New-Object PSCustomObject -Property @{
             ArchivePath = $archivePath
@@ -919,7 +919,7 @@ function Save-Item {
         foreach ($file in $files) {
             $dest = Join-Path $Destination $file.DirectoryName.SubString($Path.TrimEnd('\').Length)
             if (-not (Test-Path $dest)) {
-                New-Item $dest -ItemType Directory | Out-Null
+                $null = New-Item $dest -ItemType Directory
             }
 
             try {
@@ -950,7 +950,7 @@ function Save-IISLog {
             $session = New-PSSession -ComputerName $Server -ErrorAction Stop
             Invoke-Command -Session $session -ScriptBlock {
                 # Flush the log buffer
-                netsh http flush logbuffer | Out-Null
+                $null = & netsh.exe http flush logbuffer
 
                 Import-Module WebAdministration
                 $webSites = @(Get-Website)
@@ -1213,7 +1213,7 @@ function Invoke-Ldifde {
 
     # if Path doesn't exit, create it
     if (-not (Test-Path $Path)) {
-        New-Item -ItemType directory $Path | Out-Null
+        $null = New-Item -ItemType directory $Path
     }
 
     $resolvedPath = Resolve-Path $Path -ErrorAction SilentlyContinue
@@ -1308,8 +1308,8 @@ function Get-Runspace {
         # Add Exchange Local PowerShell so that it's ready to be used.
         $ps = [PowerShell]::Create()
         $ps.Runspace = $rs
-        $ps.AddCommand('Add-PSSnapin').AddParameter('Name', 'Microsoft.Exchange.Management.PowerShell.E2010') | Out-Null
-        $ps.Invoke() | Out-Null
+        $null = $ps.AddCommand('Add-PSSnapin').AddParameter('Name', 'Microsoft.Exchange.Management.PowerShell.E2010')
+        $null = $ps.Invoke()
         $ps.Dispose()
     }
     elseif ($Script:ExchangeRemotePS) {
@@ -1390,7 +1390,7 @@ function New-AsyncCallback {
     }
 
     $proxy = [AsyncCallbackProxy]::Create()
-    Register-ObjectEvent -InputObject $proxy -EventName AsyncOpComplete -Action $Callback -Messagedata $args | Out-Null
+    $null = Register-ObjectEvent -InputObject $proxy -EventName AsyncOpComplete -Action $Callback -Messagedata $args
 
     # When an async operation finishes, this AsyncCallback instance gets invoked, which in turn raises AsynOpCompleted event of the proxy object.
     # Since this AsynOpCompleted is registered by Register-ObjectEvent, it calls the script block.
@@ -1471,10 +1471,10 @@ function RunCommand {
                 }
 
                 if ($ps -and $params[0].Value.SwitchParameter) {
-                    $psCommand.AddParameter($params[0].Key) | Out-Null
+                    $null = $psCommand.AddParameter($params[0].Key)
                 }
                 elseif ($ps) {
-                    $psCommand.AddParameter($params[0].Key, $paramValue) | Out-Null
+                    $null = $psCommand.AddParameter($params[0].Key, $paramValue)
                 }
 
                 Write-Output $params[0]
@@ -1492,10 +1492,10 @@ function RunCommand {
                 $Command += " -$param"
                 if ($ps) {
                     if ($paramVal) {
-                        $psCommand.AddParameter($paramName, $paramVal) | Out-Null
+                        $null = $psCommand.AddParameter($paramName, $paramVal)
                     }
                     else {
-                        $psCommand.AddParameter($paramName) | Out-Null
+                        $null = $psCommand.AddParameter($paramName)
                     }
 
                 }
@@ -1530,8 +1530,8 @@ function RunCommand {
     catch {
         # Log the terminating error.
         try {
-            $_.GetType() | Out-Null
-            $_.Exception.GetType() | Out-Null
+            $null = $_.GetType()
+            $null = $_.Exception.GetType()
             Write-Log "[Terminating Error] '$Command' failed. $($_.ToString()) $(if ($_.Exception.Line) {"(At line:$($_.Exception.Line) char:$($_.Exception.Offset))"})"
             if ($null -ne $Script:errs) { $Script.errs.Add($_) }
         }
@@ -1543,8 +1543,8 @@ function RunCommand {
         if ($errs.Count) {
             foreach ($err in $errs) {
                 try {
-                    $err.GetType() | Out-Null
-                    $err.Exception.GetType() | Out-Null
+                    $null = $err.GetType()
+                    $null = $err.Exception.GetType()
                     Write-Log "[Non-Terminating Error] Error in '$Command'. $($err.ToString()) $(if ($err.Exception.Line) {"(At line:$($err.Exception.Line) char:$($err.Exception.Offset))"})"
                 }
                 catch {
@@ -1565,7 +1565,7 @@ function RunCommand {
                     AsyncResult = $ar
                 }
 
-                $ps.BeginStop(
+                $null = $ps.BeginStop(
                     (
                         New-AsyncCallback {
                             param ([IAsyncResult]$asyncResult)
@@ -1575,7 +1575,7 @@ function RunCommand {
                         }
                     ),
                     $context
-                ) | Out-Null
+                )
             }
             else {
                 $ps.Dispose()
@@ -1669,7 +1669,7 @@ function Run {
                 try {
                     # If GetType() fails, most likely this type is not CLS-compliant
                     # Note: Do not pipe the result of GetType() to Out-Null. After 2021 Nov SU (KB5007409), that hangs PowerShell.
-                    $discard = $temp[$i].GetType()
+                    $null = $temp[$i].GetType()
                 }
                 catch {
                     Write-Log "$Command returned a non-CLS-compliant type"
@@ -1757,7 +1757,7 @@ function Run {
         }
         else {
             # Extract cmdlet name (e.g "Get-MailboxDatabase" -> "MailboxDatabase")
-            $Command.Split(' ')[0] -match ".*-(?<cmdName>.*)" | Out-Null
+            $null = $Command.Split(' ')[0] -match ".*-(?<cmdName>.*)"
             $commandName = $Matches['cmdName']
             Save-Object $result -Name $commandName
         }
@@ -1792,9 +1792,9 @@ function Write-Log {
 
     # Format as CSV:
     $sb = New-Object System.Text.StringBuilder
-    $sb.Append($currentTimeFormatted).Append(',') | Out-Null
-    $sb.Append($delta.TotalMilliseconds).Append(',') | Out-Null
-    $sb.Append('"').Append($Text.Replace('"', "'")).Append('"') | Out-Null
+    $null = $sb.Append($currentTimeFormatted).Append(',')
+    $null = $sb.Append($delta.TotalMilliseconds).Append(',')
+    $null = $sb.Append('"').Append($Text.Replace('"', "'")).Append('"')
 
     $Script:logWriter.WriteLine($sb.ToString())
 
@@ -1995,7 +1995,7 @@ function Invoke-Executable {
         #     $stdOut.Append($eventArgs.Data)
         # }
 
-        $process.Start() | Out-Null
+        $null = $process.Start()
 
         # Be careful here. Deadlock can occur b/w parent and child process!
         # https://msdn.microsoft.com/en-us/library/system.diagnostics.processstartinfo.redirectstandardoutput(v=vs.110).aspx
@@ -2065,13 +2065,13 @@ function Save-ExchangeEventLog {
     )
 
     if (-not (Test-Path $Path -ErrorAction Stop)) {
-        New-Item -ItemType directory $Path -ErrorAction Stop | Out-Null
+        $null = New-Item -ItemType directory $Path -ErrorAction Stop
     }
 
     # Save logs from a server into a separate folder
     $destination = Join-Path $Path -ChildPath $Server
     if (-not (Test-Path $destination)) {
-        New-Item -ItemType directory $destination -ErrorAction Stop | Out-Null
+        $null = New-Item -ItemType directory $destination -ErrorAction Stop
     }
 
     # This is remote machine's path
@@ -2080,7 +2080,7 @@ function Save-ExchangeEventLog {
     $uncWinTempEventPath = ConvertTo-UNCPath $winTempEventPath -Server $Server
 
     if (-not (Test-Path $uncWinTempEventPath -ErrorAction Stop)) {
-        New-Item $uncWinTempEventPath -ItemType Directory -ErrorAction Stop | Out-Null
+        $null = New-Item $uncWinTempEventPath -ItemType Directory -ErrorAction Stop
     }
 
     Write-Log "[$($MyInvocation.MyCommand)] Saving event logs on $Server ..."
@@ -2820,10 +2820,12 @@ function Save-AppConfig {
 
     $destination = [IO.Path]::Combine($Path, $Server)
     $inetsrvDestination = [IO.Path]::Combine($destination, 'inetsrv')
+    $inetpubDestination = [IO.Path]::Combine($destination, 'inetpub')
 
     if (-not (Test-Path $destination)) {
-        New-Item -ItemType Directory $destination | Out-Null
-        New-Item -ItemType Directory $inetsrvDestination | Out-Null
+        $null = New-Item -ItemType Directory $destination
+        $null = New-Item -ItemType Directory $inetsrvDestination
+        $null = New-Item -ItemType Directory $inetpubDestination
     }
 
     $exchangePath = Get-ExchangeInstallPath -Server $Server -ErrorAction Stop
@@ -2836,6 +2838,10 @@ function Save-AppConfig {
     $inetPath = [IO.Path]::Combine($systemRoot, 'System32\inetsrv\config')
     $uncInetPath = ConvertTo-UNCPath -Server $Server -Path $inetPath
     Save-Item -Path $uncInetPath -Destination $inetsrvDestination -Filter '*.config'
+
+    # Save IIS wwwroot's web.config ("C:\inetpub\wwwroot")
+    $uncInetPubPath = ConvertTo-UNCPath -Server $Server -Path 'C:\inetpub\wwwroot'
+    Save-Item -Path $uncInetPubPath -Destination $inetpubDestination -Filter '*.config'
 }
 
 function Get-InstalledUpdate {
@@ -2877,15 +2883,15 @@ function Get-InstalledUpdate {
                     URL         = $appUpdates.GetDetailsOf($item, 7)
                     InstalledOn = $installedOn
                 }
-                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($item) | Out-Null
+                $null = [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($item)
             }
         }
         finally {
             if ($appUpdates) {
-                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($appUpdates) | Out-Null
+                $null = [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($appUpdates)
             }
             if ($shell) {
-                [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+                $null = [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($shell)
             }
         }
     }
@@ -2922,7 +2928,7 @@ function Get-NLMConnectivity {
     $isConnectedToInternet = $nlm.IsConnectedToInternet
     $conn = $nlm.GetConnectivity()
 
-    [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($nlm) | Out-Null
+    $null = [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($nlm)
     $nlm = $null
 
     # NLM_CONNECTIVITY enumeration
@@ -3083,6 +3089,14 @@ if ($FromDateTime -ge $ToDateTime) {
     throw "Parameter ToDateTime ($ToDateTime) must be after FromDateTime ($FromDateTime)"
 }
 
+# If ToDateTime is given only a date without time (such as 2022/10/20, instead of 2022/10/20 11:00), Add one day in order to avoid missing data.
+if ($PSBoundParameters.ContainsKey('ToDateTime') `
+        -and $ToDateTime.Hour -eq 0 `
+        -and $ToDateTime.Minute -eq 0 `
+        -and $ToDateTime.Second -eq 0) {
+    $ToDateTime = $ToDateTime.AddDays(1)
+}
+
 if (-not (Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue)) {
     throw "Get-OrganizationConfig is not available. Please run after importing an Exchange Remote PowerShell session"
 }
@@ -3093,7 +3107,7 @@ $IsExchangeOnline = $orgConfig.LegacyExchangeDN.StartsWith('/o=ExchangeLabs')
 
 # If the path doesn't exist, create it.
 if (-not (Test-Path $Path -ErrorAction Stop)) {
-    New-Item -ItemType directory $Path -ErrorAction Stop | Out-Null
+    $null = New-Item -ItemType directory $Path -ErrorAction Stop
 }
 $Path = Resolve-Path $Path
 
@@ -3119,10 +3133,10 @@ foreach ($paramName in $PSBoundParameters.Keys) {
     $var = Get-Variable $paramName -ErrorAction SilentlyContinue
     if ($var) {
         if ($var.Value -is [DateTime]) {
-            $sb.Append("$($var.Name):$($var.Value.ToUniversalTime().ToString('o')); ") | Out-Null
+            $null = $sb.Append("$($var.Name):$($var.Value.ToUniversalTime().ToString('o')); ")
         }
         else {
-            $sb.Append("$($var.Name):$($var.Value -join ','); ") | Out-Null
+            $null = $sb.Append("$($var.Name):$($var.Value -join ','); ")
         }
     }
 }
@@ -3210,7 +3224,7 @@ if ($null -ne $PSDefaultParameterValues -and -not $PSDefaultParameterValues.Cont
 $transcriptPath = Join-Path -Path $Path -ChildPath "transcript.txt"
 $transcriptEnabled = $false
 try {
-    Start-Transcript -Path $transcriptPath -NoClobber -ErrorAction:Stop | Out-Null
+    $null = Start-Transcript -Path $transcriptPath -NoClobber -ErrorAction:Stop
     $transcriptEnabled = $true
 }
 catch {
@@ -3530,7 +3544,7 @@ try {
     if ($Script:errs.Count) {
         $errPath = Join-Path $Path -ChildPath "Error"
         if (-not (Test-Path errPath)) {
-            New-Item $errPath -ItemType Directory -ErrorAction Stop | Out-Null
+            $null = New-Item $errPath -ItemType Directory -ErrorAction Stop
         }
         $Script.errs | Export-Clixml $(Join-Path $errPath "errs.xml") -Depth 5
     }
@@ -3549,7 +3563,7 @@ finally {
 
     # release transcript file even when script is stopped in the middle.
     if ($transcriptEnabled) {
-        $(Stop-Transcript) 2>&1 | Out-Null
+        $null = $(Stop-Transcript) 2>&1
     }
 }
 
