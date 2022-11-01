@@ -3089,14 +3089,6 @@ if ($FromDateTime -ge $ToDateTime) {
     throw "Parameter ToDateTime ($ToDateTime) must be after FromDateTime ($FromDateTime)"
 }
 
-# If ToDateTime is given only a date without time (such as 2022/10/20, instead of 2022/10/20 11:00), Add one day in order to avoid missing data.
-if ($PSBoundParameters.ContainsKey('ToDateTime') `
-        -and $ToDateTime.Hour -eq 0 `
-        -and $ToDateTime.Minute -eq 0 `
-        -and $ToDateTime.Second -eq 0) {
-    $ToDateTime = $ToDateTime.AddDays(1)
-}
-
 if (-not (Get-Command "Get-OrganizationConfig" -ErrorAction:SilentlyContinue)) {
     throw "Get-OrganizationConfig is not available. Please run after importing an Exchange Remote PowerShell session"
 }
@@ -3147,6 +3139,14 @@ $originalPath = $Path
 $Path = $tempFolder.FullName
 Write-Log "Temporary Folder: $($tempFolder.FullName)"
 
+# If ToDateTime is given only a date without time (such as 2022/10/20, instead of 2022/10/20 11:00), Change it to the end of the day (e.g. 2022/10/20 23:59:59)
+if ($PSBoundParameters.ContainsKey('ToDateTime') `
+        -and $ToDateTime.Hour -eq 0 `
+        -and $ToDateTime.Minute -eq 0 `
+        -and $ToDateTime.Second -eq 0) {
+    $ToDateTime = $ToDateTime.AddDays(1).AddSeconds(-1)
+    Write-Log "ToDateTime has been adjusted to $($ToDateTime.ToUniversalTime().ToString('o'))"
+}
 
 if ($Servers -and -not (Get-Command Get-ExchangeServer -ErrorAction SilentlyContinue)) {
     throw "Servers parameter is specified, but Get-ExchangeServer is not available."
