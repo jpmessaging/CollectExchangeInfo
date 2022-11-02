@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-10-30"
+$version = "2022-11-01"
 #requires -Version 2.0
 
 <#
