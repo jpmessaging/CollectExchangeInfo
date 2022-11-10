@@ -198,14 +198,14 @@ function Save-Object {
             if ($WithCliXml) {
                 try {
                     # Export-Clixml could fail for non-CLS-compliant objects
-                    $objectList | Export-Clixml -Path:([IO.Path]::Combine($Path, "$objectName.xml")) -Encoding:UTF8 -Depth $Depth
+                    $objectList | Export-Clixml -Path ([IO.Path]::Combine($Path, "$objectName.xml")) -Encoding UTF8 -Depth $Depth
                 }
                 catch {
                     Write-Error "Export-CliXml failed. $_"
                 }
             }
 
-            $objectList | Format-List * | Set-Content ([IO.Path]::Combine($Path, "$objectName.txt")) -Encoding:UTF8
+            $objectList | Format-List * -Force | Out-File ([IO.Path]::Combine($Path, "$objectName.txt")) -Encoding UTF8
         }
     }
 }
@@ -1281,21 +1281,32 @@ function Get-Runspace {
             $Script:ExchangeLocalPS = $true
         }
         elseif ($Command.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $Command.Module) {
-            $Script:ExchangeRemotePS = $true
+            # When ExchangeOnlineManagement 3.0.0 is used to connect to EXO, no PSSession gets created.
+            # To support this scenario, enable ExchangeRemotePS only if a remote Session for Exchange or EXO is found.
 
-            # Remember the primary runspace so that its ConnectionInfo can be used when creating a new remote runspace.
-            $Script:PrimaryRunspace = Get-PSSession | Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Availability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*' } | Select-Object -First 1 -ExpandProperty Runspace
-            if (-not $Script:PrimaryRunspace) {
-                # If "Available" runspace is not there, then select whichever
-                $Script:PrimaryRunspace = Get-PSSession | Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*' } | Select-Object -First 1 -ExpandProperty Runspace
+            # See if Remote PowerShell session(s) for Exchange/EXO exist
+            $exchangeSessions = @(Get-PSSession | Where-Object { $_.ConfigurationName -eq 'Microsoft.Exchange' -and $_.Runspace.ConnectionInfo.ConnectionUri.ToString() -notlike '*ps.compliance.protection.outlook.com*' })
+
+            if ($exchangeSessions.Count -gt 0) {
+                # Prefer the "Available" session.
+                $exchangeSession = $exchangeSessions | Where-Object { $_.Availability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available } | Select-Object -First 1
+
+                if (-not $exchangeSession) {
+                    # If "Available" runspace is not there, then select whichever
+                    $exchangeSession = $exchangeSessions[0]
+                }
+
+                # Remember the primary runspace so that its ConnectionInfo can be used when creating a new remote runspace.
+                $Script:PrimaryRunspace = $exchangeSession.Runspace
+                $Script:ExchangeRemotePS = $true
+                $Script:RunspacePool.Add($Script:PrimaryRunspace)
             }
-
-            $Script:RunspacePool.Add($Script:PrimaryRunspace)
         }
     }
 
     # Find an available runspace
     $rs = $Script:RunspacePool | Where-Object { $_.RunspaceAvailability -eq [System.Management.Automation.Runspaces.RunspaceAvailability]::Available } | Select-Object -First 1
+
     if ($rs) {
         return $rs
     }
@@ -1426,10 +1437,13 @@ function RunCommand {
 
     $ExchangeLocalPS = $false
     $ExchangeRemotePS = $false
+
     if ($cmd.CommandType -eq [System.Management.Automation.CommandTypes]::Cmdlet -and $cmd.ModuleName -eq 'Microsoft.Exchange.Management.PowerShell.E2010') {
         $ExchangeLocalPS = $true
     }
-    elseif ($cmd.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmd.Module -and $cmd.Module.ExportedFunctions.ContainsKey("Get-OrganizationConfig")) {
+    elseif ($cmd.CommandType -eq [System.Management.Automation.CommandTypes]::Function -and $cmd.Module -and $cmd.Module.ExportedFunctions.ContainsKey("Get-OrganizationConfig") `
+            -and $Script:PrimaryRunspace) {
+        # Script:PrimaryRunspace check is added for ExchangeOnlineManagement 3.0.0 scenario.
         $ExchangeRemotePS = $true
     }
 
@@ -3151,6 +3165,10 @@ if ($PSBoundParameters.ContainsKey('ToDateTime') `
 if ($Servers -and -not (Get-Command Get-ExchangeServer -ErrorAction SilentlyContinue)) {
     throw "Servers parameter is specified, but Get-ExchangeServer is not available."
 }
+
+# This will init the runspace pool & make Script:PrimaryRunspace available.
+# A quick & dirty fix for issue related to ExchangeOnlineManagement 3.0.0.
+$null = Get-Runspace
 
 # Prepare the list of Exchange Servers to directly access by parsing the values specified in "Servers" parameter
 # Used in VDir, Mailbox Catabase Copy, Certificate etc.
