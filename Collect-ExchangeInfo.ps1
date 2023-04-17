@@ -143,7 +143,7 @@ param (
     [string]$ArchiveType = 'Zip'
 )
 
-$version = "2022-11-10"
+$version = "2023-04-17"
 #requires -Version 2.0
 
 <#
@@ -835,16 +835,21 @@ function Save-Item {
     $server = $serverAndPath.Server
     $localPath = $serverAndPath.LocalPath
 
-    # When saving local files, no need to compress
     $needCompress = $true
+
+    # When saving local files, no need to compress
     if (-not $server -or $server -eq $env:COMPUTERNAME) {
         $needCompress = $false
+        $Path = $localPath
     }
 
     # Make sure that the remote server's Windows TEMP (will be used as archive destination) is accessible.
-    $winTempPath = Get-WindowsTempFolder -Server $server
-    if (-not (Test-Path -LiteralPath (ConvertTo-UNCPath -Server $server -Path $winTempPath))) {
-        $needCompress = $false
+    if ($needCompress) {
+        $winTempPath = Get-WindowsTempFolder -Server $server
+
+        if (-not (Test-Path -LiteralPath (ConvertTo-UNCPath -Server $server -Path $winTempPath))) {
+            $needCompress = $false
+        }
     }
 
     if ($needCompress) {
@@ -2616,7 +2621,11 @@ function Get-ExSetupVersion {
     )
 
     $exsetupPath = [IO.Path]::Combine($(Get-ExchangeInstallPath -Server $Server -ErrorAction Stop), 'Bin\ExSetup.exe')
-    $exsetupPath = ConvertTo-UNCPath $exsetupPath -Server $Server
+
+    if ($env:COMPUTERNAME -ne $Server) {
+        $exsetupPath = ConvertTo-UNCPath $exsetupPath -Server $Server
+    }
+
     (Get-ItemProperty $exsetupPath).VersionInfo
 }
 
@@ -3339,7 +3348,9 @@ try {
 
     # Server Settings
     Write-Progress -Activity $collectionActivity -Status:"Server Settings" -PercentComplete:40
-    Run Get-ExchangeServer
+    Run 'Get-ExchangeServer -Status' -Servers $directAccessServers -Identifier 'Identity' -PassThru |
+    Run Get-ExchangeServer -RemoveDuplicate
+
     Run Get-MailboxServer
 
     # For CAS (>= E14) in DAS list, include ASA info
