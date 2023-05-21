@@ -817,8 +817,17 @@ function Save-Item {
         [switch]$ShowProgress
     )
 
+    # Switch the source path to local path if the source is this computer.
+    $serverAndPath = ConvertFrom-UNCPath $Path
+    $server = $serverAndPath.Server
+    $localPath = $serverAndPath.LocalPath
+
+    if ($null -eq $server -or $server -eq $env:COMPUTERNAME) {
+        $Path = $localPath
+    }
+
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Error "Path $Path is not found."
+        Write-Error "Path '$Path' is not found."
         return
     }
 
@@ -830,10 +839,6 @@ function Save-Item {
     }
 
     Write-Log "[$($MyInvocation.MyCommand)] Source: $Path, Destination: $Destination"
-
-    $serverAndPath = ConvertFrom-UNCPath $Path.ToString()
-    $server = $serverAndPath.Server
-    $localPath = $serverAndPath.LocalPath
 
     $needCompress = $true
 
@@ -2767,11 +2772,12 @@ function Get-UnifiedContent {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        $Server
+        [string]$Server
     )
 
     # Only E2013 or later.
     $exServer = Get-ExchangeServer $Server
+
     if (-not $exServer.IsE15OrLater) {
         Write-Log "Skipping $Server because it is E2010 or before."
         return
@@ -2779,12 +2785,17 @@ function Get-UnifiedContent {
 
     # Find Transport's TemporaryStoragePath from config file.
     $edgeConfigFile = [IO.Path]::Combine($(Get-ExchangeInstallPath -Server $Server -ErrorAction Stop), 'bin\EdgeTransport.exe.config')
-    $edgeConfigFileUNC = ConvertTo-UNCPath -Server $Server.ToString() -Path $edgeConfigFile
+
+    if ($Server -ne $env:COMPUTERNAME) {
+        $edgeConfigFile = ConvertTo-UNCPath -Server $Server -Path $edgeConfigFile
+    }
 
     $reader = $null
+
     try {
-        $reader = [IO.File]::OpenText($edgeConfigFileUNC)
+        $reader = [IO.File]::OpenText($edgeConfigFile)
         $tempPath = $null
+
         while ($line = $reader.ReadLine()) {
             if ($line -match '<add key="TemporaryStoragePath" +value="(?<tempPath>.+)"') {
                 $tempPath = $Matches['tempPath']
@@ -2793,12 +2804,15 @@ function Get-UnifiedContent {
         }
 
         if (-not $tempPath) {
-            Write-Error "Cannot find TemporaryStoragePath in $edgeConfigFileUNC"
+            Write-Error "Cannot find TemporaryStoragePath in $edgeConfigFile"
             return
         }
 
-        $tempPathUNC = ConvertTo-UNCPath -Server $Server.ToString() -Path $tempPath
-        $unifiedContent = Join-Path $tempPathUNC 'UnifiedContent'
+        if ($Server -ne $env:COMPUTERNAME) {
+            $tempPath = ConvertTo-UNCPath -Server $Server -Path $tempPath
+        }
+
+        $unifiedContent = Join-Path $tempPath 'UnifiedContent'
 
         $totalSize = 0
         $count = 0
