@@ -818,7 +818,7 @@ function Save-Item {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        Write-Error "Path "$Path" is not found."
+        Write-Error "Path $Path is not found."
         return
     }
 
