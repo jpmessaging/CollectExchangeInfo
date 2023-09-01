@@ -3217,14 +3217,25 @@ Write-Log "directAccessCandidates = $directAccessCandidates"
 # Since there shouldn't be anything blocking communication b/w Exchange Servers, we should be able to use ICMP
 $directAccessServers = @(
     foreach ($server in $directAccessCandidates) {
-        if ($server.Name -eq $env:COMPUTERNAME -or (Test-Connection -ComputerName:$server.Name -Count 1 -Quiet)) {
+        if ($server.Name -eq $env:COMPUTERNAME) {
+            Write-Log "Connectivity test is skipped for $($server.Name) because this is the local machine"
+            $server
+            continue
+        }
+
+        $pingErr = $($pingStatus = Test-Connection -ComputerName $server.Fqdn -Count 1) 2>&1
+
+        if ($pingStatus) {
+            Write-Log "PingStatus of $($pingStatus.Address): ProtocolAddress: $($pingStatus.ProtocolAddress), ResponseTime: $($pingStatus.ResponseTime)"
+            $pingStatus.Dispose()
             $server
         }
         else {
-            Write-Log "Connectivity test failed on $server"
+            Write-Log "Connectivity test failed on $($server.Fqdn). $pingErr"
         }
     }
 )
+
 Write-Log "directAccessServers = $directAccessServers"
 
 if (Get-Command Get-ExchangeServer -ErrorAction SilentlyContinue) {
@@ -3244,6 +3255,17 @@ foreach ($server in $allExchangeServers) {
 # Configure default parameters. PSDefaultParameterValues is only available for PSv3 or later.
 if ($null -ne $PSDefaultParameterValues -and -not $PSDefaultParameterValues.ContainsKey('Save-Item:ArchiveType')) {
     $PSDefaultParameterValues['Save-Item:ArchiveType'] = $ArchiveType
+}
+
+# Enable ViewEntireForest
+$adServerSettings = Get-ADServerSettings -WarningAction SilentlyContinue
+$err = Set-ADServerSettings -ViewEntireForest $true -WarningAction SilentlyContinue 2>&1
+
+if ($err) {
+    Write-Log "Failed to enable -ViewEntireForest. $err"
+}
+else {
+    Write-Log "ViewEntireForest is set to True. Original value is $($adServerSettings.ViewEntireForest)"
 }
 
 # Save errors for troubleshooting purpose
@@ -3498,9 +3520,15 @@ try {
     Run 'Get-WmiObject -Class Win32_PageFileSetting' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_PageFileSetting
     Run 'Get-WmiObject -Class Win32_ComputerSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_ComputerSystem
     Run 'Get-WmiObject -Class Win32_OperatingSystem' -Servers $directAccessServers -Identifier ComputerName -PassThru | Save-Object -Name Win32_OperatingSystem
-    Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -PassThru |
-    Where-Object { $_.IPEnabled } | Save-Object -Name Win32_NetworkAdapterConfiguration
-    Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -PassThru | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
+    Run "Get-WmiObject -Class Win32_NetworkAdapterConfiguration" -Servers:$directAccessServers -Identifier:ComputerName -PassThru `
+    | Where-Object { $_.IPEnabled } | Save-Object -Name Win32_NetworkAdapterConfiguration
+
+    Run "Get-WmiObject -Class Win32_Process" -Servers:$directAccessServers -Identifier:ComputerName -PassThru `
+    | Select-Object ProcessName, Path, CommandLine, ProcessId, ServerName | Save-Object -Name Win32_Process
+
+    Run "Get-WmiObject -Class Win32_Service" -Servers:$directAccessServers -Identifier:ComputerName -PassThru `
+    | Select-Object -Property Name, DisplayName, PathName, ServiceType, StartMode, Caption, Description, ProcessId, Started, StartName, State, ServerName `
+    | Save-Object -Name Win32_Service
 
     # Get Exsetup version
     Run "Get-ExSetupVersion" -Servers $directAccessServers
@@ -3585,6 +3613,12 @@ try {
     $allDone = $true
 } # end of try for transcript
 finally {
+    # Reset ViewEntireForest
+    if ($adServerSettings) {
+        Set-ADServerSettings -ViewEntireForest $adServerSettings.ViewEntireForest -ErrorAction SilentlyContinue
+        Write-Log "ViewEntireForest was reset to $($adServerSettings.ViewEntireForest)"
+    }
+
     Remove-Runspace
 
     if (-not $allDone) {
