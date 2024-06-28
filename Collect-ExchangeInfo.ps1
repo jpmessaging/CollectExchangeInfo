@@ -907,7 +907,7 @@ function Save-Item {
             $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Where-Object { -not $_.PSIsContainer })
         }
 
-        $sortedFiles = $files | Sort-Object -Property 'LastWriteTime'
+        $sortedFiles = @($files | Sort-Object -Property 'LastWriteTime')
 
         if ($PSBoundParameters.ContainsKey('FromDateTime') -and $FromDateTime -ne [DateTime]::MinValue) {
             $files = @($files | Where-Object { $_.LastWriteTime -ge $FromDateTime })
