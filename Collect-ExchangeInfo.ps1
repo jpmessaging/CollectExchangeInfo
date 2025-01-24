@@ -2337,7 +2337,8 @@ function Get-Net45Version {
     )
 
     switch ($Release) {
-        { $_ -ge 528040 } { '4.8 or later'; break }
+        { $_ -ge 533320 } { '4.8.1 or later'; break }
+        { $_ -ge 528040 } { '4.8'; break }
         { $_ -ge 461808 } { '4.7.2'; break }
         { $_ -ge 460798 } { '4.7'; break }
         { $_ -ge 394802 } { "4.6.2"; break }
