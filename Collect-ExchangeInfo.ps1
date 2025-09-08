@@ -1089,6 +1089,38 @@ function Save-ExchangeLogging {
     Save-Item -Path $source -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
 }
 
+function Save-PerformanceLog {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Path,
+        [Parameter(Mandatory = $true)]
+        $Server,
+        [DateTime]$FromDateTime,
+        [DateTime]$ToDateTime
+    )
+
+    $dcs = $null
+
+    try {
+        # Get the path from DCS "ExchangeDiagnosticsDailyPerformanceLog"
+        $dcs = New-Object -COM Pla.DataCollectorSet
+        $dcs.Query('ExchangeDiagnosticsDailyPerformanceLog', $Server)
+
+        $source = ConvertTo-UNCPath $dcs.RootPath -Server $Server
+        $destination = Join-path $Path -ChildPath $Server
+        Save-Item -Path $source -Destination $destination -FromDateTime $FromDateTime -ToDateTime $ToDateTime
+    }
+    catch {
+        Write-Error -Message "Failed to save perfmon logs of Server '$Server' $_" -Exception $_.Exception
+    }
+    finally {
+        if ($dcs) {
+            [System.Runtime.Interopservices.Marshal]::FinalReleaseComObject($dcs)
+        }
+    }
+}
+
 function Save-TransportLog {
     [CmdletBinding()]
     param(
@@ -1515,7 +1547,6 @@ function RunCommand {
                     else {
                         $null = $psCommand.AddParameter($paramName)
                     }
-
                 }
             }
         }
@@ -3434,7 +3465,7 @@ try {
     Run Get-GlobalMonitoringOverride
     Run Get-ServerMonitoringOverride -Servers:($directAccessServers | Where-Object { $_.IsE15OrLater })
     Run Get-ServerComponentState -Servers:($directAccessServers | Where-Object { $_.IsE15OrLater }) -Identifier:Identity
-    # Heath-related command are now commented out since rarely needed.
+    # Health-related command are now commented out since rarely needed.
     # Run Get-HealthReport -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
     # Run Get-ServerHealth -Servers:($directAccessServers | Where-Object {$_.IsE15OrLater}) -Identifier:Identity
     # Run Test-ServiceHealth -Servers:$directAccessServers
@@ -3567,7 +3598,7 @@ try {
     # Collect Perfmon Log
     if ($IncludePerformanceLog) {
         Write-Progress -Activity $collectionActivity -Status:"Perfmon Logs" -PercentComplete:90
-        Run "Save-ExchangeLogging -Path:$(Join-Path $Path 'Perfmon') -FolderPath 'Diagnostics\DailyPerformanceLogs' -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
+        Run "Save-PerformanceLog -Path:$(Join-Path $Path 'Perfmon') -FromDateTime:'$FromDateTime' -ToDateTime:'$ToDateTime'" -Servers $($directAccessServers | Where-Object { $_.IsE15OrLater })
     }
 
     # Collect IIS Log
